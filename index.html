@@ -326,8 +326,8 @@ function parseWorkbook(buf){
 /* ───────── 계산 ───────── */
 // 자산 탭 '1월 대비 현재'의 자산군 수익률. 소분류 이름(필요하면 대분류까지)으로 묶는다.
 const RETURN_GROUPS = [
-  {name:'주식', label:'주식 수익률', note:'현금 · 주식 · 퇴직금 합산',
-   items:[['유동자산','현금'], [null,'참주식'], [null,'정윤주식'], [null,'참퇴직금'], [null,'정윤퇴직금']]},
+  {name:'주식', label:'주식 수익률', note:'참·정윤 주식 + 퇴직금 합산',
+   items:[[null,'참주식'], [null,'정윤주식'], [null,'참퇴직금'], [null,'정윤퇴직금']]},
   {name:'부동산', label:'부동산 수익률', note:'아파트', items:[['비유동자산','아파트']]},
 ];
 const inGroup = (g, a) => g.items.some(([big, small]) => a.small === small && (!big || a.big === big));
