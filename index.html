@@ -116,6 +116,14 @@ main{padding:4px 16px calc(96px + env(safe-area-inset-bottom));max-width:640px;m
 .split .s .t{font-size:12px;color:var(--sub);font-weight:600;display:flex;align-items:center;gap:6px}
 .split .s .v{font-size:17px;font-weight:750;margin-top:3px;letter-spacing:-.02em}
 .split .s .d{font-size:12px;margin-top:1px}
+.home-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.hc{background:var(--card);border-radius:18px;padding:16px 14px;box-shadow:var(--shadow);min-width:0}
+.hc .t{font-size:13px;color:var(--sub);font-weight:600;display:flex;align-items:center;gap:6px}
+.hc .v{font-size:20px;font-weight:800;margin-top:6px;letter-spacing:-.03em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hc .f{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:12px;color:var(--sub);display:flex;justify-content:space-between;align-items:baseline;gap:6px}
+.hc .f b{font-size:14px}
+.warn{background:#FFF7E6;color:#9A5B00;border-radius:14px;padding:12px 14px;font-size:13px;margin-bottom:12px}
+:root[data-theme="dark"] .warn{background:#2B2210;color:#F5C26B}
 .flow-lg{display:flex;justify-content:space-between;font-size:12px;color:var(--sub)}
 
 table{width:100%;border-collapse:collapse;font-size:13.5px}
@@ -188,9 +196,10 @@ nav.tabs button.on{color:var(--ink)}
 <main id="view"></main>
 
 <nav class="tabs">
-  <button data-tab="budget" class="on"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>가계부</button>
+  <button data-tab="home" class="on"><svg viewBox="0 0 24 24"><path d="M3 10 12 4l9 6"/><path d="M5 10v9h14v-9"/><path d="M10 19v-5h4v5"/></svg>홈</button>
+  <button data-tab="budget"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>가계부</button>
   <button data-tab="trend"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>월별추이</button>
-  <button data-tab="asset"><svg viewBox="0 0 24 24"><path d="M3 10 12 4l9 6"/><path d="M5 10v9h14v-9"/><path d="M10 19v-5h4v5"/></svg>자산</button>
+  <button data-tab="asset"><svg viewBox="0 0 24 24"><path d="M21 12A9 9 0 1 1 12 3v9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/></svg>자산</button>
 </nav>
 
 <div class="scrim" id="scrim"></div>
@@ -238,7 +247,7 @@ const LS = {
   del(k){ try{ localStorage.removeItem('ah.'+k); }catch(e){} }
 };
 const S = {
-  tab: LS.get('tab','budget'),
+  tab: LS.get('tab','home'),
   theme: LS.get('theme','system'),
   unit: LS.get('unit','short'),
   sources: LS.get('sources', null),      // 게시 URL 목록 (연도별 파일)
@@ -325,6 +334,12 @@ function parseWorkbook(buf){
 
 /* ───────── 계산 ───────── */
 // 자산 탭 '1월 대비 현재'의 자산군 수익률. 소분류 이름(필요하면 대분류까지)으로 묶는다.
+// 홈 탭 분류. 금융투자·현금은 소분류 이름, 부동산은 중분류 '부동산', 부채는 대분류 '부채'로 묶는다.
+const HOME_GROUPS = {
+  invest: {label:'금융투자', note:'주식 · 퇴직금 · 비트코인', match: a => ['참주식','정윤주식','참퇴직금','정윤퇴직금','비트코인'].includes(a.small)},
+  estate: {label:'부동산',   note:'중분류 부동산',           match: a => a.big === '비유동자산' && a.mid === '부동산'},
+  cash:   {label:'현금',     note:'현금 · 복지포인트 · 예비현금 · 청약', match: a => ['현금','복지포인트','예비현금','참청약','정윤청약'].includes(a.small)},
+};
 const RETURN_GROUPS = [
   {name:'주식', label:'주식 수익률', note:'참·정윤 주식 + 퇴직금 합산',
    items:[[null,'참주식'], [null,'정윤주식'], [null,'참퇴직금'], [null,'정윤퇴직금']]},
@@ -405,6 +420,64 @@ function donut(id, labels, data, colors){
 const monthLabels = () => Array.from({length:12}, (_,i)=>(i+1)+'월');
 const scaleWon = (extra={}) => ({grid:{color:css('--line')}, border:{display:false}, ticks:{callback:axisWon, maxTicksLimit:6}, ...extra});
 const scaleX = {grid:{display:false}, border:{display:false}, ticks:{maxRotation:0, autoSkip:false, callback:(v,i)=>i+1}};
+
+/* ───────── 화면: 홈 ───────── */
+// '현재' = 오늘 날짜 이전에서 자산이 입력된 가장 최근 (연도, 월). 모든 연도 파일을 통틀어 찾는다.
+function assetPoints(){
+  const now = new Date(), cy = now.getFullYear(), cm = now.getMonth() + 1, pts = [];
+  for (const y of [...yearsList()].reverse()){
+    const lim = y < cy ? 12 : y === cy ? cm : 0;
+    for (let m = 1; m <= lim; m++){ const x = aMonth(m, y); if (x.has) pts.push(x); }
+  }
+  return pts;   // 시간순
+}
+const grpSum = (g, x) => S.years[x.y].assets.filter(g.match).reduce((s, a) => s + x.val(a), 0);
+const monthsBetween = (a, b) => (b.y * 12 + b.m) - (a.y * 12 + a.m);
+// 연평균 수익률(CAGR): 값이 처음 0보다 컸던 달 → 현재
+function cagr(pts, fn){
+  const cur = pts.at(-1), v1 = fn(cur), st = pts.find(x => fn(x) > 0);
+  if (!st || st === cur || v1 <= 0) return null;
+  const n = monthsBetween(st, cur), v0 = fn(st);
+  return {rate: Math.pow(v1 / v0, 12 / n) - 1, n, from: st, total: v1 / v0 - 1};
+}
+function viewHome(){
+  const pts = assetPoints();
+  if (!pts.length){ $('#view').innerHTML = `<div class="empty"><b>자산 데이터가 없어요</b>엑셀 '자산관리' 시트에 입력하면 홈에 표시돼요.</div>`; return; }
+  const cur = pts.at(-1), G = HOME_GROUPS;
+  const inv = grpSum(G.invest, cur), est = grpSum(G.estate, cur), cash = grpSum(G.cash, cur);
+  const list = S.years[cur.y].assets;
+  const loose = list.filter(a => a.big !== '부채' && !Object.values(G).some(g => g.match(a)));
+  const looseSum = loose.reduce((s, a) => s + cur.val(a), 0);
+  const rTotal = cagr(pts, x => x.total), rNet = cagr(pts, x => x.net),
+        rInv = cagr(pts, x => grpSum(G.invest, x)), rEst = cagr(pts, x => grpSum(G.estate, x));
+  const span = rTotal || rNet;
+  const foot = (r) => r ? `<div class="f"><span>연평균</span><b class="num ${dir(r.rate)}">${pct(r.rate, 2)}</b></div>`
+                        : `<div class="f"><span>연평균</span><span>-</span></div>`;
+  const tot = Math.max(cur.total, 1);
+  const prevX = pts.length > 1 ? pts.at(-2) : null;
+  $('#view').innerHTML = `
+  <section class="card hero">
+    <div class="label">${cur.y}년 ${cur.m}월 말 순자산</div>
+    <div class="big num">${money(cur.net)}</div>
+    <div class="sub">${prevX ? `${prevX.y !== cur.y ? prevX.y + '년 ' : ''}${prevX.m}월 대비 <span class="${dir(cur.net - prevX.net)}">${signed(cur.net - prevX.net)}</span>` : '첫 기록이에요'}</div>
+    <div class="sub" style="font-size:12px;margin-top:14px">총자산 구성</div>
+    <div class="flow" style="margin-top:6px"><i style="width:${inv/tot*100}%;background:var(--accent)"></i><i style="width:${est/tot*100}%;background:var(--fixed)"></i><i style="width:${cash/tot*100}%;background:var(--saving)"></i>${looseSum?`<i style="width:${looseSum/tot*100}%;background:var(--faint)"></i>`:''}</div>
+    <div class="flow-lg"><span>금융투자 ${pctPlain(inv/tot,0)}</span><span>부동산 ${pctPlain(est/tot,0)}</span><span>현금 ${pctPlain(cash/tot,0)}</span></div>
+  </section>
+  ${loose.length ? `<div class="warn"><b>분류되지 않은 자산 ${loose.length}개</b> · ${loose.map(a => esc(a.small)).join(', ')} (${money(looseSum)})<br>홈의 금융투자·부동산·현금 어디에도 들어가지 않아요.</div>` : ''}
+  <div class="home-grid">
+    <div class="hc"><div class="t">총자산</div><div class="v num">${money(cur.total)}</div>${foot(rTotal)}</div>
+    <div class="hc"><div class="t">순자산</div><div class="v num">${money(cur.net)}</div>${foot(rNet)}</div>
+    <div class="hc"><div class="t"><i class="dot" style="background:var(--expense)"></i>부채</div><div class="v num">${money(cur.debt)}</div>
+      <div class="f"><span>총자산 대비</span><b class="num">${pctPlain(cur.total ? cur.debt / cur.total : 0)}</b></div></div>
+    <div class="hc"><div class="t"><i class="dot" style="background:var(--accent)"></i>금융투자</div><div class="v num">${money(inv)}</div>${foot(rInv)}</div>
+    <div class="hc"><div class="t"><i class="dot" style="background:var(--fixed)"></i>부동산</div><div class="v num">${money(est)}</div>${foot(rEst)}</div>
+    <div class="hc"><div class="t"><i class="dot" style="background:var(--saving)"></i>현금비중</div><div class="v num">${cur.net > 0 ? pctPlain(cash / cur.net) : '-'}</div>
+      <div class="f"><span>현재 현금</span><b class="num">${money(cash)}</b></div></div>
+  </div>
+  <p class="note" style="margin:0 4px 12px">${span ? `연평균 수익률: ${span.from.y}년 ${span.from.m}월 → ${cur.y}년 ${cur.m}월 (${span.n}개월) 잔액 기준 연환산${span.n < 12 ? ' · <b>1년 미만 기간이라 실제보다 크게 보일 수 있어요</b>' : ''}. 저축·추가 납입도 포함돼요.` : '연평균 수익률은 두 달 이상 기록이 쌓이면 표시돼요.'}
+  현금비중은 순자산 대비예요.</p>`;
+}
 
 /* ───────── 화면: 가계부 ───────── */
 function viewBudget(){
@@ -643,13 +716,13 @@ function emptyMonth(m, what){
 }
 
 /* ───────── 라우팅 ───────── */
-const TITLES = {budget:'가계부', trend:'월별추이', asset:'자산'};
+const TITLES = {home:'홈', budget:'가계부', trend:'월별추이', asset:'자산'};
 function render(){
   killCharts();
   $('#title').innerHTML = TITLES[S.tab] + (S.meta.source==='demo' ? '<span class="demo-badge">예시</span>' : '');
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab===S.tab));
   const key = S.tab==='asset' ? 'asset' : 'budget';
-  const step = $('#stepper'); step.style.display = S.model ? 'flex' : 'none';
+  const step = $('#stepper'); step.style.display = (S.model && S.tab !== 'home') ? 'flex' : 'none';
   if (S.model){
     const fn = key==='asset' ? aMonth : bMonth;
     if (S.month[key]==null) S.month[key] = lastWith(fn);
@@ -663,7 +736,7 @@ function render(){
   }
   updateStatus();
   if (!S.model) return emptyMonth(null, '');
-  ({budget:viewBudget, trend:viewTrend, asset:viewAsset})[S.tab]();
+  ({home:viewHome, budget:viewBudget, trend:viewTrend, asset:viewAsset})[S.tab]();
 }
 function go(tab){ S.tab = tab; LS.set('tab', tab); window.scrollTo(0,0); render(); }
 document.querySelectorAll('nav.tabs button').forEach(b => b.onclick = () => go(b.dataset.tab));
@@ -697,7 +770,7 @@ $('#prevM').onclick = () => shift(-1); $('#nextM').onclick = () => shift(1);
 (() => { let x0=null, y0=null;
   document.addEventListener('touchstart', e => { if (e.target.closest('canvas,.sheet,select')) return; x0=e.touches[0].clientX; y0=e.touches[0].clientY; }, {passive:true});
   document.addEventListener('touchend', e => { if (x0==null) return; const dx=e.changedTouches[0].clientX-x0, dy=e.changedTouches[0].clientY-y0; x0=null;
-    if (S.model && Math.abs(dx)>70 && Math.abs(dy)<40) shift(dx<0?1:-1); }, {passive:true});
+    if (S.model && S.tab!=='home' && Math.abs(dx)>70 && Math.abs(dy)<40) shift(dx<0?1:-1); }, {passive:true});
 })();
 
 /* ───────── 테마 ───────── */
