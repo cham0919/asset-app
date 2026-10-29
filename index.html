@@ -50,7 +50,15 @@ input,select{font:inherit;color:var(--ink)}
 .stepper button{width:40px;height:36px;border-radius:10px;display:grid;place-items:center;color:var(--sub)}
 .stepper button:disabled{opacity:.25}
 .stepper button svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
-.stepper .cur{font-weight:700;font-size:17px;min-width:120px;text-align:center}
+.pickers{display:flex;gap:6px;align-items:center}
+.sel select{appearance:none;-webkit-appearance:none;border:0;background-color:var(--card);box-shadow:var(--shadow);border-radius:12px;height:38px;
+  padding:0 30px 0 14px;font-size:16px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums;cursor:pointer;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238B95A1' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 11px center}
+.src{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.src .y{font-weight:700;min-width:62px}
+.src .u{flex:1;min-width:0;font-size:12px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.src button{color:var(--up);font-size:13px;font-weight:600;padding:4px 2px}
 
 main{padding:4px 16px calc(96px + env(safe-area-inset-bottom));max-width:640px;margin:0 auto}
 .card{background:var(--card);border-radius:20px;padding:18px;margin-bottom:12px;box-shadow:var(--shadow)}
@@ -166,9 +174,9 @@ nav.tabs button.on{color:var(--ink)}
   </div>
   <div class="status" id="status"></div>
   <div class="stepper" id="stepper">
-    <button id="prevM" aria-label="이전 달"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
-    <div class="cur num" id="curM"></div>
-    <button id="nextM" aria-label="다음 달"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
+    <button id="prevM" aria-label="이전"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
+    <div class="pickers"><span class="sel"><select id="selY" aria-label="연도"></select></span><span class="sel" id="selMWrap"><select id="selM" aria-label="월"></select></span></div>
+    <button id="nextM" aria-label="다음"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
   </div>
 </header>
 
@@ -205,10 +213,12 @@ nav.tabs button.on{color:var(--ink)}
     <input type="file" id="fileInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
   </div>
 
-  <h4>구글 스프레드시트 연결</h4>
+  <h4>구글 스프레드시트 연결 · 연도별</h4>
   <div class="card" style="padding:14px">
-    <label class="field"><span>웹에 게시 URL</span><input id="inPub" placeholder="https://docs.google.com/spreadsheets/d/e/2PACX-…/pub?output=xlsx" autocapitalize="off" autocomplete="off" spellcheck="false" inputmode="url"></label>
-    <p class="note" style="margin-top:0">스프레드시트의 <b>파일 → 공유 → 웹에 게시</b>에서 받은 주소를 붙여넣으세요. 형식을 웹페이지·CSV로 게시했어도 앱이 xlsx 주소로 바꿔서 읽어요.</p>
+    <div id="srcList" style="margin-bottom:12px"></div>
+    <label class="field"><span>웹에 게시 URL 추가</span><input id="inPub" placeholder="https://docs.google.com/spreadsheets/d/e/2PACX-…/pub?output=xlsx" autocapitalize="off" autocomplete="off" spellcheck="false" inputmode="url"></label>
+    <button class="btn ghost" id="btnAdd">추가하고 불러오기</button>
+    <p class="note">연도마다 스프레드시트를 하나씩 두고, 각각 <b>파일 → 공유 → 웹에 게시</b>한 주소를 추가하세요. 연도는 파일 '설정' 시트의 <b>기준 연도</b>로 자동 구분돼요.</p>
     <p class="note">앱은 게시된 데이터를 <b>읽기만</b> 합니다. 스프레드시트 수정 후 게시본에 반영되기까지 몇 분 걸릴 수 있어요. 불러온 데이터는 이 아이폰에만 저장돼 오프라인에서도 볼 수 있어요.</p>
   </div>
 </section>
@@ -226,8 +236,11 @@ const S = {
   tab: LS.get('tab','budget'),
   theme: LS.get('theme','system'),
   unit: LS.get('unit','short'),
-  pubUrl: LS.get('pubUrl',''),
-  model: LS.get('model', null),
+  sources: LS.get('sources', null),      // 게시 URL 목록 (연도별 파일)
+  srcYear: LS.get('srcYear', {}),        // URL → 연도
+  years: LS.get('years', null),          // 연도 → 데이터
+  year: LS.get('year', null),
+  model: null,                           // 현재 선택 연도의 데이터
   meta: LS.get('meta', {}),
   month: { budget:null, asset:null },
   assetPick: LS.get('assetPick','__net'),
@@ -301,22 +314,29 @@ function parseWorkbook(buf){
 }
 
 /* ───────── 계산 ───────── */
-function bMonth(m){
-  const items = (S.model?.budget?.[m]) || [];
+function wrapYM(m, y){ if (m < 1) return [m + 12, y - 1]; if (m > 12) return [m - 12, y + 1]; return [m, y]; }
+function bMonth(m, y = S.year){
+  [m, y] = wrapYM(m, y);
+  const items = (S.years?.[y]?.budget?.[m]) || [];
   const sum = k => items.filter(i=>i.kind===k).reduce((a,i)=>a+i.amt,0);
   const income = sum('수입'), fixed = sum('고정비'), variable = sum('변동비'), expense = fixed + variable;
   const has = items.some(i => i.filled && i.amt !== 0);
-  return {m, items, has, income, fixed, variable, expense, saving: income-expense, rate: income ? (income-expense)/income : 0};
+  return {m, y, items, has, income, fixed, variable, expense, saving: income-expense, rate: income ? (income-expense)/income : 0};
 }
-function aMonth(m){
-  if (!S.model || m<1 || m>12) return {has:false};
-  const idx = m-1, list = S.model.assets;
+function aMonth(m, y = S.year){
+  [m, y] = wrapYM(m, y);
+  const M = S.years?.[y];
+  if (!M) return {has:false, m, y};
+  const idx = m-1, list = M.assets;
   const has = list.some(a => a.v[idx] != null);
-  const val = a => a.v[idx] ?? 0;
+  // 다른 연도 파일의 같은 항목은 대분류|중분류|소분류 이름으로 맞춰 찾는다
+  const key = a => a.big + '|' + a.mid + '|' + a.small, byKey = new Map();
+  list.forEach(a => byKey.set(key(a), (byKey.get(key(a)) || 0) + (a.v[idx] ?? 0)));
+  const val = a => list.includes(a) ? (a.v[idx] ?? 0) : (byKey.get(key(a)) ?? 0);
   const by = b => list.filter(a=>a.big===b).reduce((s,a)=>s+val(a),0);
   const liquid = by('유동자산'), fixedA = by('비유동자산'), debt = by('부채');
   const total = liquid + fixedA;
-  return {m, has, liquid, fixedA, debt, total, net: total-debt, val};
+  return {m, y, has, liquid, fixedA, debt, total, net: total-debt, val};
 }
 function analysis(m){
   const c = aMonth(m), p = aMonth(m-1), b = bMonth(m);
@@ -461,8 +481,11 @@ function viewAsset(){
   const d = (cur, prev, kind) => A.prevOk ? `<div class="d ${dir(cur-prev)}">${signed(cur-prev)}${prev? ' ('+pct((cur-prev)/prev)+')' : ''}</div>` : `<div class="d muted">전월 데이터 없음</div>`;
   const list = S.model.assets;
   const ms = Array.from({length:12},(_,i)=>aMonth(i+1));
-  // 1월 대비 현재(가장 최근 입력월) — 엑셀 자산관리 상단 칸과 같은 기준
-  const L = lastWith(aMonth), j = ms[0], cur = ms[L-1];
+  // 1월 대비 현재 — 엑셀과 같은 기준: 오늘 날짜의 월, 그 달이 미입력이면 그 이전 마지막 입력월
+  const now = new Date(), Y = S.model.year;
+  const TM = now.getFullYear() > Y ? 12 : now.getFullYear() < Y ? 0 : now.getMonth() + 1;
+  let L = 0; for (let k = TM; k >= 1; k--) if (ms[k-1].has) { L = k; break; }
+  const j = ms[0], cur = ms[Math.max(L,1)-1];
   const ytd = (j.has && L >= 2) ? [['총자산', j.total, cur.total], ['순자산', j.net, cur.net]] : null;
   const opt = [['__net','순자산'],['__total','총자산'],['__debt','부채'],
     ...BIGS.flatMap(b => midsOf(b).map(md => ['mid:'+b+'|'+md, `${md} (${b})`])),
@@ -481,7 +504,7 @@ function viewAsset(){
     <div class="tile"><div class="t">유동자산</div><div class="v num">${money(c.liquid)}</div>${d(c.liquid,p.liquid)}</div>
     <div class="tile"><div class="t">비유동자산</div><div class="v num">${money(c.fixedA)}</div>${d(c.fixedA,p.fixedA)}</div>
   </div>
-  ${ytd ? `<section class="card"><h3>1월 대비 현재 <small>1월 → ${L}월${L!==m?' (최근)':''}</small></h3>
+  ${ytd ? `<section class="card"><h3>1월 대비 현재 <small>1월 → ${L}월${L<TM?` · ${TM}월 미입력`:''}</small></h3>
     <div class="stats">${ytd.map(([n,a,b])=>`
       <div class="stat"><div class="t">${n} 증가율</div><div class="v num ${dir(b-a)}" style="font-size:22px">${a?pct((b-a)/Math.abs(a),2):'-'}</div>
         <div class="h" style="color:var(--sub)"><span class="${dir(b-a)}">${signed(b-a)}</span> · ${money(a)} → ${money(b)}</div></div>`).join('')}
@@ -563,11 +586,17 @@ function render(){
   $('#title').innerHTML = TITLES[S.tab] + (S.meta.source==='demo' ? '<span class="demo-badge">예시</span>' : '');
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab===S.tab));
   const key = S.tab==='asset' ? 'asset' : 'budget';
-  const step = $('#stepper'); step.style.display = (S.tab==='trend' || !S.model) ? 'none' : 'flex';
+  const step = $('#stepper'); step.style.display = S.model ? 'flex' : 'none';
   if (S.model){
-    if (S.month[key]==null) S.month[key] = key==='asset' ? lastWith(aMonth) : lastWith(bMonth);
-    $('#curM').textContent = `${S.model.year}년 ${S.month[key]}월`;
-    $('#prevM').disabled = S.month[key] <= 1; $('#nextM').disabled = S.month[key] >= 12;
+    const fn = key==='asset' ? aMonth : bMonth;
+    if (S.month[key]==null) S.month[key] = lastWith(fn);
+    $('#selY').innerHTML = yearsList().map(y => `<option value="${y}"${y===S.year?' selected':''}>${y}년</option>`).join('');
+    const trend = S.tab==='trend';
+    $('#selMWrap').style.display = trend ? 'none' : '';
+    if (!trend) $('#selM').innerHTML = Array.from({length:12}, (_,i) => i+1).map(m =>
+      `<option value="${m}"${m===S.month[key]?' selected':''}>${m}월${fn(m).has?'':' · 미입력'}</option>`).join('');
+    $('#prevM').disabled = !canShift(-1); $('#nextM').disabled = !canShift(1);
+    $('#prevM').setAttribute('aria-label', trend ? '이전 연도' : '이전 달'); $('#nextM').setAttribute('aria-label', trend ? '다음 연도' : '다음 달');
   }
   updateStatus();
   if (!S.model) return emptyMonth(null, '');
@@ -575,13 +604,37 @@ function render(){
 }
 function go(tab){ S.tab = tab; LS.set('tab', tab); window.scrollTo(0,0); render(); }
 document.querySelectorAll('nav.tabs button').forEach(b => b.onclick = () => go(b.dataset.tab));
-const shift = n => { const key = S.tab==='asset'?'asset':'budget'; S.month[key] = Math.min(12, Math.max(1, S.month[key]+n)); render(); };
+const yearsList = () => Object.keys(S.years || {}).map(Number).sort((a,b) => b-a);
+const adjYear = n => { const asc = [...yearsList()].reverse(), i = asc.indexOf(S.year); return asc[i+n] ?? null; };
+function defaultYear(){ const ys = yearsList(), cy = new Date().getFullYear(); return ys.includes(cy) ? cy : ys[0]; }
+function setYear(y){
+  const ys = yearsList();
+  if (!ys.length){ S.year = null; S.model = null; return; }
+  if (!ys.includes(y)) y = defaultYear();
+  if (y !== S.year) S.month = {budget:null, asset:null};
+  S.year = y; S.model = S.years[y]; LS.set('year', y);
+}
+function canShift(n){
+  if (S.tab==='trend') return adjYear(n) != null;
+  const key = S.tab==='asset'?'asset':'budget', m = S.month[key] + n;
+  return (m >= 1 && m <= 12) || adjYear(n) != null;
+}
+function shift(n){
+  if (!S.model || !canShift(n)) return;
+  if (S.tab==='trend'){ setYear(adjYear(n)); return render(); }
+  const key = S.tab==='asset'?'asset':'budget', m = S.month[key] + n;
+  if (m < 1 || m > 12){ setYear(adjYear(n)); S.month[key] = m < 1 ? 12 : 1; }   // 연도 넘어가기
+  else S.month[key] = m;
+  render();
+}
+$('#selY').onchange = e => { setYear(+e.target.value); render(); };
+$('#selM').onchange = e => { S.month[S.tab==='asset'?'asset':'budget'] = +e.target.value; render(); };
 $('#prevM').onclick = () => shift(-1); $('#nextM').onclick = () => shift(1);
 // 좌우 스와이프로 월 이동
 (() => { let x0=null, y0=null;
   document.addEventListener('touchstart', e => { if (e.target.closest('canvas,.sheet,select')) return; x0=e.touches[0].clientX; y0=e.touches[0].clientY; }, {passive:true});
   document.addEventListener('touchend', e => { if (x0==null) return; const dx=e.changedTouches[0].clientX-x0, dy=e.changedTouches[0].clientY-y0; x0=null;
-    if (S.tab!=='trend' && S.model && Math.abs(dx)>70 && Math.abs(dy)<40) shift(dx<0?1:-1); }, {passive:true});
+    if (S.model && Math.abs(dx)>70 && Math.abs(dy)<40) shift(dx<0?1:-1); }, {passive:true});
 })();
 
 /* ───────── 테마 ───────── */
@@ -598,38 +651,72 @@ function seg(id, val, cb){ const el = $(id); el.querySelectorAll('button').forEa
 function syncSheet(){
   seg('#segTheme', S.theme, v => { S.theme=v; LS.set('theme',v); applyTheme(); syncSheet(); render(); });
   seg('#segUnit', S.unit, v => { S.unit=v; LS.set('unit',v); syncSheet(); render(); });
-  $('#inPub').value = S.pubUrl;
-  $('#sSource').textContent = !S.model ? '없음' : S.meta.source==='pub' ? '구글 스프레드시트 (웹에 게시)' : S.meta.source==='file' ? '기기 파일 · ' + (S.meta.name||'') : '예시 데이터';
+  const ys = yearsList().slice().reverse().join(', ');
+  $('#sSource').textContent = !S.model ? '없음' : S.meta.source==='pub' ? `웹에 게시 · ${ys}년` : S.meta.source==='file' ? `기기 파일 · ${ys}년` : `예시 데이터 · ${ys}년`;
+  renderSrc();
   $('#sSync').textContent = S.meta.syncedAt ? fmtTime(S.meta.syncedAt) : '-';
 }
 function openSheet(){ syncSheet(); $('#sheet').classList.add('on'); $('#scrim').classList.add('on'); }
 function closeSheet(){
-  S.pubUrl = $('#inPub').value.trim(); LS.set('pubUrl', S.pubUrl);
   $('#sheet').classList.remove('on'); $('#scrim').classList.remove('on');
+  if (addSource(true)) syncPub(true);   // 입력만 하고 닫아도 추가
+}
+function renderSrc(){
+  $('#srcList').innerHTML = S.sources.length ? S.sources.map((u, i) => `<div class="src"><span class="y">${S.srcYear[u] ? S.srcYear[u] + '년' : '확인 전'}</span>
+      <span class="u">${esc(u.replace('https://docs.google.com/spreadsheets/d/e/', '').replace('/pub?output=xlsx', ''))}</span><button data-i="${i}">삭제</button></div>`).join('')
+    : '<p class="note" style="margin:0">등록된 게시 URL이 없어요</p>';
+  $('#srcList').querySelectorAll('button').forEach(b => b.onclick = () => removeSource(+b.dataset.i));
+}
+function saveSources(){ LS.set('sources', S.sources); LS.set('srcYear', S.srcYear); }
+function addSource(silent){
+  const raw = $('#inPub').value.trim(); if (!raw) return false;
+  const u = pubXlsxUrl(raw);
+  if (!u){ if (!silent) toast("게시 URL 형식이 아니에요. '웹에 게시'에서 받은 주소를 넣어 주세요"); return false; }
+  $('#inPub').value = '';
+  if (S.sources.includes(u)){ if (!silent) toast('이미 등록된 주소예요'); return false; }
+  S.sources.push(u); saveSources(); renderSrc(); return true;
+}
+function removeSource(i){
+  const u = S.sources[i], y = S.srcYear[u];
+  if (!confirm(`${y ? y + '년 ' : ''}연결을 삭제할까요?`)) return;
+  S.sources.splice(i, 1); delete S.srcYear[u]; saveSources();
+  if (S.meta.source === 'pub' && y && !S.sources.some(v => S.srcYear[v] === y)){
+    delete S.years[y]; LS.set('years', S.years); setYear(S.year); render();
+  }
+  syncSheet();
 }
 $('#setBtn').onclick = openSheet; $('#closeSheet').onclick = closeSheet; $('#scrim').onclick = closeSheet;
-$('#btnSync').onclick = () => { closeSheet(); syncPub(true); };
+$('#btnSync').onclick = () => { addSource(true); $('#sheet').classList.remove('on'); $('#scrim').classList.remove('on'); syncPub(true); };
+$('#btnAdd').onclick = () => { if (addSource(false)) syncPub(true); };
 $('#btnDemo').onclick = () => { closeSheet(); loadDemo(); };
 $('#btnFile').onclick = () => $('#fileInput').click();
 $('#fileInput').onchange = async e => { const f = e.target.files[0]; if (!f) return; closeSheet();
-  try { setModel(parseWorkbook(await f.arrayBuffer()), {source:'file', name:f.name, modified:f.lastModified}); toast('파일을 불러왔어요'); }
+  try { const md = parseWorkbook(await f.arrayBuffer());
+    const ys = S.meta.source === 'file' ? {...S.years} : {}; ys[md.year] = md;   // 기기 파일끼리는 연도별로 합침
+    setYears(ys, {source:'file', name:f.name}); setYear(md.year); render(); toast(`${md.year}년 파일을 불러왔어요`); }
   catch(err){ toast('파일을 읽지 못했어요: ' + err.message); } e.target.value=''; };
-$('#syncBtn').onclick = () => S.pubUrl ? syncPub(true) : openSheet();
+$('#syncBtn').onclick = () => S.sources.length ? syncPub(true) : openSheet();
 
 /* ───────── 데이터 반영 ───────── */
-function setModel(model, meta){
-  S.model = model; S.meta = {...meta, syncedAt: Date.now()};
-  LS.set('model', model); LS.set('meta', S.meta);
-  S.month = {budget:null, asset:null}; render();
+function setYears(years, meta, keepView){
+  const y = S.year, keep = {...S.month};
+  S.years = years; S.meta = {...meta, syncedAt: Date.now()};
+  LS.set('years', years); LS.set('meta', S.meta);
+  S.year = null; setYear(keepView && years[y] ? y : defaultYear());
+  if (keepView && S.year === y) S.month = keep;
+  render();
+  if ($('#sheet').classList.contains('on')) syncSheet();
 }
 async function loadDemo(){
-  try { const r = await fetch('demo.xlsx'); if (!r.ok) throw new Error(r.status);
-    setModel(parseWorkbook(await r.arrayBuffer()), {source:'demo'}); toast('예시 데이터를 불러왔어요'); }
-  catch(e){ toast('예시 파일을 불러오지 못했어요'); }
+  try {
+    const ys = {};
+    for (const f of ['demo2025.xlsx', 'demo.xlsx']){ const r = await fetch(f); if (!r.ok) throw new Error(r.status); const md = parseWorkbook(await r.arrayBuffer()); ys[md.year] = md; }
+    setYears(ys, {source:'demo'}); toast('예시 데이터를 불러왔어요 (2025 · 2026년)');
+  } catch(e){ toast('예시 파일을 불러오지 못했어요'); }
 }
 const fmtTime = t => { const d = new Date(t); return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
 function updateStatus(){
-  $('#status').textContent = !S.model ? '' : S.meta.source==='pub' ? `업데이트 ${fmtTime(S.meta.syncedAt)}` :
+  $('#status').textContent = !S.model ? '' : S.meta.source==='pub' ? `업데이트 ${fmtTime(S.meta.syncedAt)}${yearsList().length > 1 ? ` · ${yearsList().length}개 연도` : ''}` :
     S.meta.source==='file' ? `기기 파일 · ${fmtTime(S.meta.syncedAt)}` : '예시 데이터로 보는 중';
 }
 let toastT; function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'), 2600); }
@@ -641,35 +728,44 @@ function pubXlsxUrl(raw){
   return m ? `https://docs.google.com/spreadsheets/d/e/${m[1]}/pub?output=xlsx` : null;
 }
 let syncing = false;
+const errText = e => e instanceof TypeError ? '네트워크 연결 또는 접근이 차단됐어요' : e.message;
+async function fetchPub(u){
+  const r = await fetch(u + '&_t=' + Date.now(), {cache:'no-store'});
+  if (!r.ok) throw new Error(r.status === 404 ? '게시가 중지됐거나 주소가 바뀌었어요' : 'HTTP ' + r.status);
+  const buf = await r.arrayBuffer(), h = new Uint8Array(buf.slice(0, 2));
+  if (h[0] !== 0x50 || h[1] !== 0x4B) throw new Error('엑셀 파일이 아닌 응답이 왔어요. 게시 상태를 확인하세요');
+  return parseWorkbook(buf);
+}
 async function syncPub(interactive){
   if (syncing) return;
-  const url = pubXlsxUrl(S.pubUrl);
-  if (!url){
-    if (interactive){ toast(S.pubUrl ? "게시 URL 형식이 아니에요. '웹에 게시'에서 받은 주소를 넣어 주세요" : '설정에서 게시 URL을 입력하세요'); openSheet(); }
-    return;
-  }
+  if (!S.sources.length){ if (interactive){ toast('설정에서 게시 URL을 추가하세요'); openSheet(); } return; }
   syncing = true; $('#syncBtn').classList.add('spin');
   try{
-    const r = await fetch(url + '&_t=' + Date.now(), {cache:'no-store'});
-    if (!r.ok) throw new Error(r.status===404 ? '게시가 중지됐거나 주소가 바뀌었어요' : 'HTTP ' + r.status);
-    const buf = await r.arrayBuffer();
-    const head = new Uint8Array(buf.slice(0, 2));
-    if (head[0] !== 0x50 || head[1] !== 0x4B) throw new Error('엑셀 파일이 아닌 응답이 왔어요. 게시 상태를 확인하세요');
-    const keep = {...S.month}, had = S.meta.source === 'pub';
-    setModel(parseWorkbook(buf), {source:'pub'});
-    if (had && keep.budget){ S.month = keep; render(); }
-    if (interactive) toast('최신 데이터로 업데이트했어요');
-  }catch(e){
-    if (interactive || !S.model) toast('불러오기 실패: ' + (e instanceof TypeError ? '네트워크 연결 또는 접근이 차단됐어요' : e.message));
-  }finally{ syncing = false; $('#syncBtn').classList.remove('spin'); }
+    const res = await Promise.all(S.sources.map(u => fetchPub(u).then(m => ({u, m}), e => ({u, e}))));
+    const old = S.meta.source === 'pub' ? (S.years || {}) : {}, next = {}, dup = [], fail = [];
+    for (const r of res){
+      if (r.m){ if (next[r.m.year]) dup.push(r.m.year); next[r.m.year] = r.m; S.srcYear[r.u] = r.m.year; }
+      else fail.push(r);
+    }
+    for (const r of fail){ const y = S.srcYear[r.u]; if (y && old[y] && !next[y]) next[y] = old[y]; }   // 실패한 연도는 이전 데이터 유지
+    saveSources(); renderSrc();
+    if (!Object.keys(next).length){ if (interactive || !S.model) toast('불러오기 실패: ' + errText(fail[0].e)); return; }
+    setYears(next, {source:'pub'}, S.meta.source === 'pub');
+    if (dup.length) toast(`${[...new Set(dup)].join(', ')}년 파일이 여러 개예요. 목록의 마지막 주소 기준으로 보여줘요`);
+    else if (fail.length) toast(`${fail.length}개 주소를 불러오지 못했어요: ${errText(fail[0].e)}`);
+    else if (interactive) toast('최신 데이터로 업데이트했어요');
+  } finally { syncing = false; $('#syncBtn').classList.remove('spin'); }
 }
 
 /* ───────── 시작 ───────── */
 applyTheme();
-LS.del('token'); LS.del('authState'); LS.del('clientId'); LS.del('fileRef');   // 이전 로그인 방식 흔적 정리
+['token','authState','clientId','fileRef'].forEach(k => LS.del(k));   // 이전 로그인 방식 흔적 정리
+if (!S.sources){ const p = pubXlsxUrl(LS.get('pubUrl','')); S.sources = p ? [p] : []; saveSources(); LS.del('pubUrl'); }   // 단일 URL → 목록
+if (!S.years){ const m = LS.get('model', null); S.years = m ? {[m.year]: m} : {}; LS.set('years', S.years); LS.del('model'); }
+setYear(S.year);
 render();
-const stale = () => S.pubUrl && Date.now() - (S.meta.syncedAt || 0) > 60 * 1000;
-if (S.pubUrl && (S.meta.source !== 'file' && S.meta.source !== 'demo' || !S.model) && stale()) syncPub(false);
+const stale = () => S.sources.length && Date.now() - (S.meta.syncedAt || 0) > 60 * 1000;
+if (S.sources.length && (S.meta.source !== 'file' && S.meta.source !== 'demo' || !S.model) && stale()) syncPub(false);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && S.meta.source === 'pub' && stale()) syncPub(false);
 });
