@@ -1,0 +1,671 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>우리집 자산</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="우리집 자산">
+<meta name="theme-color" content="#F5F6F8">
+<meta name="robots" content="noindex, nofollow">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg:#F5F6F8; --card:#FFFFFF; --ink:#191F28; --sub:#6B7684; --faint:#AEB5BF; --line:#EEF0F3;
+  --chip:#F2F4F6; --accent:#3182F6; --accent-soft:#E8F3FF;
+  --up:#F04452; --down:#3182F6; --income:#3182F6; --expense:#F04452; --saving:#22B07D; --fixed:#FB923C;
+  --shadow:0 1px 2px rgba(0,0,0,.04),0 4px 16px rgba(0,0,0,.04);
+  --tabbar:rgba(255,255,255,.88);
+}
+:root[data-theme="dark"]{
+  --bg:#0E1013; --card:#1A1D22; --ink:#ECEEF1; --sub:#9AA2AD; --faint:#5E6670; --line:#262A31;
+  --chip:#23272E; --accent:#4C94FF; --accent-soft:#1B2B44;
+  --up:#FF5C6A; --down:#4C94FF; --income:#4C94FF; --expense:#FF5C6A; --saving:#2FC48D; --fixed:#FDA15A;
+  --shadow:none; --tabbar:rgba(20,22,26,.88);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink)}
+body{font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Noto Sans KR",system-ui,sans-serif;
+  font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased;overscroll-behavior-y:none}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+input,select{font:inherit;color:var(--ink)}
+.num{font-variant-numeric:tabular-nums}
+
+/* top bar */
+.top{position:sticky;top:0;z-index:20;background:var(--bg);padding:calc(env(safe-area-inset-top) + 10px) 16px 8px}
+.top-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.top h1{font-size:26px;font-weight:800;letter-spacing:-.02em;margin:0}
+.icon-btn{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:var(--card);box-shadow:var(--shadow)}
+.icon-btn svg{width:20px;height:20px;stroke:var(--ink);fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.icon-btn.spin svg{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.status{font-size:12px;color:var(--sub);margin-top:2px}
+
+.stepper{display:flex;align-items:center;justify-content:center;gap:4px;margin:6px 0 2px}
+.stepper button{width:40px;height:36px;border-radius:10px;display:grid;place-items:center;color:var(--sub)}
+.stepper button:disabled{opacity:.25}
+.stepper button svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.stepper .cur{font-weight:700;font-size:17px;min-width:120px;text-align:center}
+
+main{padding:4px 16px calc(96px + env(safe-area-inset-bottom));max-width:640px;margin:0 auto}
+.card{background:var(--card);border-radius:20px;padding:18px;margin-bottom:12px;box-shadow:var(--shadow)}
+.card h3{font-size:16px;font-weight:700;margin:0 0 12px;letter-spacing:-.01em;display:flex;justify-content:space-between;align-items:baseline}
+.card h3 small{font-size:12px;font-weight:500;color:var(--sub)}
+.hero .label{font-size:14px;color:var(--sub);font-weight:600}
+.hero .big{font-size:32px;font-weight:800;letter-spacing:-.03em;margin:4px 0 2px}
+.hero .sub{font-size:14px;color:var(--sub)}
+.up{color:var(--up)} .down{color:var(--down)} .muted{color:var(--sub)}
+
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.tiles.two{grid-template-columns:repeat(2,1fr)}
+.tile{background:var(--card);border-radius:16px;padding:14px 12px;box-shadow:var(--shadow);min-width:0}
+.tile .t{font-size:12px;color:var(--sub);font-weight:600;display:flex;align-items:center;gap:6px}
+.tile .v{font-size:17px;font-weight:750;margin-top:4px;letter-spacing:-.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .d{font-size:12px;margin-top:2px;white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+
+.donut{position:relative;height:200px;margin:4px 0 14px}
+.donut .center{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;text-align:center}
+.donut .center b{display:block;font-size:22px;font-weight:800;letter-spacing:-.02em}
+.donut .center span{font-size:12px;color:var(--sub)}
+.chart{position:relative;height:230px}
+.chart.tall{height:260px}
+
+.legend{display:flex;flex-direction:column;gap:10px}
+.lg{display:flex;align-items:center;gap:10px;font-size:14px}
+.lg .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lg .p{color:var(--sub);font-size:13px;width:48px;text-align:right}
+.lg .a{font-weight:650;text-align:right;min-width:92px}
+
+.group{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}
+.group:first-of-type{border-top:0;padding-top:0;margin-top:0}
+.gh{display:flex;justify-content:space-between;align-items:center;font-weight:700;margin-bottom:8px}
+.gh .tag{font-size:12px;font-weight:700;padding:3px 8px;border-radius:8px;background:var(--chip);color:var(--sub)}
+.row{display:flex;align-items:center;gap:10px;padding:7px 0}
+.row .n{flex:1;min-width:0}
+.row .n .memo{display:block;font-size:12px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .a{text-align:right;font-weight:600}
+.row .a .d{display:block;font-size:12px;font-weight:500}
+.bar{height:4px;border-radius:2px;background:var(--chip);margin-top:5px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:2px}
+.mid{font-weight:650}
+.sub-row{padding-left:14px}
+.sub-row .n{color:var(--sub)}
+
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:14px 12px}
+.stat .t{font-size:12px;color:var(--sub);font-weight:600}
+.stat .v{font-size:17px;font-weight:750;margin-top:2px;letter-spacing:-.02em}
+.stat .h{font-size:11px;color:var(--faint);margin-top:1px}
+.flow{display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--chip);margin:14px 0 6px}
+.flow i{display:block;height:100%}
+.flow-lg{display:flex;justify-content:space-between;font-size:12px;color:var(--sub)}
+
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{font-size:12px;color:var(--sub);font-weight:600;text-align:right;padding:6px 4px;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}
+td{text-align:right;padding:10px 4px;border-bottom:1px solid var(--line)}
+tr.click{cursor:pointer} tr.off td{color:var(--faint)}
+tfoot td{font-weight:700;border-bottom:0}
+
+select.pick{appearance:none;-webkit-appearance:none;background:var(--chip);border:0;border-radius:10px;padding:7px 30px 7px 12px;font-size:13px;font-weight:600;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238B95A1' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 10px center}
+
+.empty{text-align:center;padding:48px 20px;color:var(--sub)}
+.empty b{display:block;color:var(--ink);font-size:17px;margin-bottom:6px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:46px;padding:0 18px;border-radius:14px;font-weight:700;background:var(--accent);color:#fff;width:100%}
+.btn.ghost{background:var(--chip);color:var(--ink)}
+.btn + .btn{margin-top:8px}
+
+/* tab bar */
+nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;justify-content:space-around;background:var(--tabbar);
+  -webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);border-top:1px solid var(--line);
+  padding:6px 8px calc(6px + env(safe-area-inset-bottom))}
+nav.tabs button{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 0;font-size:11px;font-weight:600;color:var(--faint)}
+nav.tabs button svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+nav.tabs button.on{color:var(--ink)}
+
+/* settings sheet */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:40;opacity:0;pointer-events:none;transition:opacity .2s}
+.scrim.on{opacity:1;pointer-events:auto}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:50;background:var(--bg);border-radius:22px 22px 0 0;max-height:92vh;overflow:auto;
+  transform:translateY(105%);transition:transform .28s cubic-bezier(.2,.8,.2,1);padding:10px 16px calc(24px + env(safe-area-inset-bottom));max-width:640px;margin:0 auto}
+.sheet.on{transform:none}
+.grab{width:38px;height:5px;border-radius:3px;background:var(--faint);opacity:.5;margin:0 auto 10px}
+.sheet h2{font-size:20px;margin:4px 2px 14px;display:flex;justify-content:space-between;align-items:center}
+.sheet h4{font-size:13px;color:var(--sub);margin:18px 4px 8px;font-weight:600}
+.seg{display:flex;background:var(--chip);border-radius:12px;padding:3px}
+.seg button{flex:1;height:34px;border-radius:9px;font-size:14px;font-weight:600;color:var(--sub)}
+.seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.field{display:block;margin-bottom:10px}
+.field span{display:block;font-size:12px;color:var(--sub);margin:0 2px 4px}
+.field input{width:100%;height:44px;border-radius:12px;border:1px solid var(--line);background:var(--card);padding:0 12px;font-size:14px}
+.kv{display:flex;justify-content:space-between;padding:6px 0;font-size:14px}
+.kv span:first-child{color:var(--sub)}
+.note{font-size:12px;color:var(--sub);margin:8px 2px 0;line-height:1.55}
+
+.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translate(-50%,20px);z-index:60;background:#191F28;color:#fff;
+  padding:11px 16px;border-radius:14px;font-size:14px;opacity:0;transition:.25s;max-width:88vw;text-align:center;pointer-events:none}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+.demo-badge{font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-soft);padding:2px 7px;border-radius:6px;margin-left:6px;vertical-align:middle}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-row">
+    <h1 id="title">가계부</h1>
+    <div style="display:flex;gap:8px">
+      <button class="icon-btn" id="syncBtn" aria-label="동기화"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v5h-5"/></svg></button>
+      <button class="icon-btn" id="setBtn" aria-label="설정"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+    </div>
+  </div>
+  <div class="status" id="status"></div>
+  <div class="stepper" id="stepper">
+    <button id="prevM" aria-label="이전 달"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
+    <div class="cur num" id="curM"></div>
+    <button id="nextM" aria-label="다음 달"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
+  </div>
+</header>
+
+<main id="view"></main>
+
+<nav class="tabs">
+  <button data-tab="budget" class="on"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>가계부</button>
+  <button data-tab="trend"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>월별추이</button>
+  <button data-tab="asset"><svg viewBox="0 0 24 24"><path d="M3 10 12 4l9 6"/><path d="M5 10v9h14v-9"/><path d="M10 19v-5h4v5"/></svg>자산</button>
+</nav>
+
+<div class="scrim" id="scrim"></div>
+<section class="sheet" id="sheet" aria-label="설정">
+  <div class="grab"></div>
+  <h2>설정 <button id="closeSheet" style="font-size:15px;color:var(--accent);font-weight:600">완료</button></h2>
+
+  <h4>화면</h4>
+  <div class="card" style="padding:14px">
+    <div class="field"><span>테마</span>
+      <div class="seg" id="segTheme"><button data-v="system">시스템</button><button data-v="light">라이트</button><button data-v="dark">다크</button></div></div>
+    <div class="field" style="margin:0"><span>금액 표시</span>
+      <div class="seg" id="segUnit"><button data-v="short">억 · 만원</button><button data-v="full">원 단위</button></div></div>
+  </div>
+
+  <h4>데이터</h4>
+  <div class="card" style="padding:14px">
+    <div class="kv"><span>데이터</span><span id="sSource">-</span></div>
+    <div class="kv"><span>마지막 동기화</span><span id="sSync">-</span></div>
+    <div style="margin-top:12px">
+      <button class="btn" id="btnSync">게시 URL에서 불러오기</button>
+      <button class="btn ghost" id="btnFile">이 기기에서 엑셀 파일 열기</button>
+      <button class="btn ghost" id="btnDemo">예시 데이터로 보기</button>
+    </div>
+    <input type="file" id="fileInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+  </div>
+
+  <h4>구글 스프레드시트 연결</h4>
+  <div class="card" style="padding:14px">
+    <label class="field"><span>웹에 게시 URL</span><input id="inPub" placeholder="https://docs.google.com/spreadsheets/d/e/2PACX-…/pub?output=xlsx" autocapitalize="off" autocomplete="off" spellcheck="false" inputmode="url"></label>
+    <p class="note" style="margin-top:0">스프레드시트의 <b>파일 → 공유 → 웹에 게시</b>에서 받은 주소를 붙여넣으세요. 형식을 웹페이지·CSV로 게시했어도 앱이 xlsx 주소로 바꿔서 읽어요.</p>
+    <p class="note">앱은 게시된 데이터를 <b>읽기만</b> 합니다. 스프레드시트 수정 후 게시본에 반영되기까지 몇 분 걸릴 수 있어요. 불러온 데이터는 이 아이폰에만 저장돼 오프라인에서도 볼 수 있어요.</p>
+  </div>
+</section>
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+/* ───────── 저장소 ───────── */
+const LS = {
+  get(k, d){ try{ const v = localStorage.getItem('ah.'+k); return v==null ? d : JSON.parse(v); }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem('ah.'+k, JSON.stringify(v)); }catch(e){} },
+  del(k){ try{ localStorage.removeItem('ah.'+k); }catch(e){} }
+};
+const S = {
+  tab: LS.get('tab','budget'),
+  theme: LS.get('theme','system'),
+  unit: LS.get('unit','short'),
+  pubUrl: LS.get('pubUrl',''),
+  model: LS.get('model', null),
+  meta: LS.get('meta', {}),
+  month: { budget:null, asset:null },
+  assetPick: LS.get('assetPick','__net'),
+};
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ───────── 포맷 ───────── */
+const won = n => (n<0?'-':'') + Math.abs(Math.round(n)).toLocaleString('ko-KR') + '원';
+function shortWon(n){
+  const a = Math.abs(Math.round(n)), s = n<0 ? '-' : '';
+  if (a >= 1e8){ let e = Math.floor(a/1e8), m = Math.round((a%1e8)/1e4); if (m>=10000){e++;m=0}
+    return s + e.toLocaleString('ko-KR') + '억' + (m ? ' ' + m.toLocaleString('ko-KR') + '만' : '') + '원'; }
+  if (a >= 1e4) return s + Math.round(a/1e4).toLocaleString('ko-KR') + '만원';
+  return s + a.toLocaleString('ko-KR') + '원';
+}
+const money = n => S.unit === 'full' ? won(n) : shortWon(n);
+const signed = n => (n>0?'+':'') + money(n);
+const pct = (x, d=1) => (x>0?'+':'') + (x*100).toFixed(d) + '%';
+const pctPlain = (x, d=1) => (x*100).toFixed(d) + '%';
+const dir = n => n>0 ? 'up' : n<0 ? 'down' : 'muted';
+const axisWon = v => { const a=Math.abs(v); return a>=1e8 ? (+(v/1e8).toFixed(2)).toString()+'억' : a>=1e4 ? Math.round(v/1e4).toLocaleString()+'만' : v; };
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const PALETTE = ['#3182F6','#22B07D','#F59E0B','#8B5CF6','#F04452','#06B6D4','#EC4899','#84CC16','#F97316','#6366F1','#14B8A6','#A855F7'];
+
+/* ───────── 엑셀 파싱 (값은 앱에서 직접 계산) ───────── */
+const KINDS = ['수입','고정비','변동비'], BIGS = ['유동자산','비유동자산','부채'];
+const toNum = v => { if (v==null || v==='') return null; if (typeof v === 'number') return isFinite(v) ? v : null;
+  const t = String(v).replace(/[,원\s]/g,''); if (t==='' || t==='-') return null; const n = Number(t); return isFinite(n) ? n : null; };
+const str = v => v==null ? '' : String(v).trim();
+
+function parseWorkbook(buf){
+  const wb = XLSX.read(buf, {type:'array'});
+  const rows = name => wb.Sheets[name] ? XLSX.utils.sheet_to_json(wb.Sheets[name], {header:1, raw:true, defval:null}) : null;
+  let year = null;
+  const st = rows('설정');
+  if (st) for (const r of st){ const i = r.findIndex(c => str(c).replace(/\s/g,'') === '기준연도'); if (i>=0){ year = toNum(r[i+1]); break; } }
+  if (!year) year = new Date().getFullYear();
+
+  const budget = {};
+  for (let m=1; m<=12; m++){
+    const R = rows(m+'월'); const items = [];
+    if (R){
+      let i = R.findIndex(r => str(r[0]).startsWith('구분'));
+      if (i >= 0) for (i=i+1; i<R.length; i++){
+        const r = R[i], k = str(r[0]);
+        if (k.startsWith('▲')) break;
+        if (!KINDS.includes(k)) continue;
+        const name = str(r[1]), amt = toNum(r[2]);
+        if (!name && amt==null) continue;
+        items.push({kind:k, name: name || '(이름 없음)', amt: amt ?? 0, memo: str(r[3]), filled: amt!=null});
+      }
+    }
+    budget[m] = items;
+  }
+
+  const A = rows('자산관리'); const assets = [];
+  if (!A) throw new Error("'자산관리' 시트를 찾지 못했어요");
+  let h = A.findIndex(r => str(r[0]) === '대분류');
+  if (h < 0) throw new Error("'자산관리' 시트에서 '대분류' 머리글을 찾지 못했어요");
+  const monthCol = {};
+  A[h].forEach((c,i) => { const mm = /^(\d{1,2})월$/.exec(str(c)); if (mm) monthCol[+mm[1]] = i; });
+  for (let i=h+1; i<A.length; i++){
+    const r = A[i], b = str(r[0]);
+    if (b.startsWith('▲') || b === '요약') break;
+    if (!BIGS.includes(b)) continue;
+    const v = []; for (let m=1; m<=12; m++) v.push(monthCol[m]!=null ? toNum(r[monthCol[m]]) : null);
+    assets.push({big:b, mid: str(r[1]) || '기타', small: str(r[2]) || str(r[1]) || '항목', v});
+  }
+  return {year, budget, assets};
+}
+
+/* ───────── 계산 ───────── */
+function bMonth(m){
+  const items = (S.model?.budget?.[m]) || [];
+  const sum = k => items.filter(i=>i.kind===k).reduce((a,i)=>a+i.amt,0);
+  const income = sum('수입'), fixed = sum('고정비'), variable = sum('변동비'), expense = fixed + variable;
+  const has = items.some(i => i.filled && i.amt !== 0);
+  return {m, items, has, income, fixed, variable, expense, saving: income-expense, rate: income ? (income-expense)/income : 0};
+}
+function aMonth(m){
+  if (!S.model || m<1 || m>12) return {has:false};
+  const idx = m-1, list = S.model.assets;
+  const has = list.some(a => a.v[idx] != null);
+  const val = a => a.v[idx] ?? 0;
+  const by = b => list.filter(a=>a.big===b).reduce((s,a)=>s+val(a),0);
+  const liquid = by('유동자산'), fixedA = by('비유동자산'), debt = by('부채');
+  const total = liquid + fixedA;
+  return {m, has, liquid, fixedA, debt, total, net: total-debt, val};
+}
+function analysis(m){
+  const c = aMonth(m), p = aMonth(m-1), b = bMonth(m);
+  const r = {c, p, prevOk: c.has && p.has};
+  if (r.prevOk){
+    r.dTotal = c.total - p.total; r.dNet = c.net - p.net;
+    r.rTotal = p.total ? r.dTotal/p.total : null; r.rNet = p.net ? r.dNet/p.net : null;
+    r.saving = b.has ? b.saving : null;
+    r.other = r.saving!=null ? r.dNet - r.saving : null;
+    r.rOther = (r.other!=null && p.net) ? r.other/p.net : null;
+  }
+  r.debtRatio = c.total ? c.debt/c.total : 0;
+  return r;
+}
+const lastWith = fn => { for (let m=12; m>=1; m--) if (fn(m).has) return m; return 1; };
+const midsOf = big => [...new Set(S.model.assets.filter(a=>a.big===big).map(a=>a.mid))];
+
+/* ───────── 차트 ───────── */
+const charts = [];
+function killCharts(){ while (charts.length) charts.pop().destroy(); }
+function mk(id, cfg){
+  const el = document.getElementById(id); if (!el || !window.Chart) return;
+  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+  Chart.defaults.font.size = 11;
+  Chart.defaults.color = css('--sub');
+  Chart.defaults.borderColor = css('--line');
+  cfg.options = Object.assign({responsive:true, maintainAspectRatio:false, animation:{duration:350}}, cfg.options||{});
+  charts.push(new Chart(el, cfg));
+}
+const tipWon = {callbacks:{label: c => ` ${c.dataset.label ? c.dataset.label+': ' : (c.label? c.label+': ' : '')}${c.raw==null?'-':money(c.raw)}`}};
+const baseTip = {backgroundColor:'#191F28', padding:10, cornerRadius:10, titleFont:{weight:'700'}, boxPadding:4};
+function donut(id, labels, data, colors){
+  mk(id, {type:'doughnut', data:{labels, datasets:[{data, backgroundColor:colors, borderWidth:0, hoverOffset:4}]},
+    options:{cutout:'72%', plugins:{legend:{display:false}, tooltip:{...baseTip, ...tipWon,
+      callbacks:{label: c => { const t = c.dataset.data.reduce((a,b)=>a+b,0); return ` ${c.label}: ${money(c.raw)} (${t?pctPlain(c.raw/t):'-'})`; }}}}}});
+}
+const monthLabels = () => Array.from({length:12}, (_,i)=>(i+1)+'월');
+const scaleWon = (extra={}) => ({grid:{color:css('--line')}, border:{display:false}, ticks:{callback:axisWon, maxTicksLimit:6}, ...extra});
+const scaleX = {grid:{display:false}, border:{display:false}, ticks:{maxRotation:0, autoSkip:false, callback:(v,i)=>i+1}};
+
+/* ───────── 화면: 가계부 ───────── */
+function viewBudget(){
+  const m = S.month.budget, b = bMonth(m), pb = bMonth(m-1);
+  if (!b.has) return emptyMonth(m, '가계부');
+  const dExp = pb.has ? b.expense - pb.expense : null;
+  const dSav = pb.has ? b.saving - pb.saving : null;
+  const exItems = b.items.filter(i=>i.kind!=='수입' && i.amt>0).sort((x,y)=>y.amt-x.amt);
+  const flowTot = Math.max(b.income, b.expense, 1);
+  let html = `
+  <section class="card hero">
+    <div class="label">${m}월 저축 <span class="muted">· 수입 − 지출</span></div>
+    <div class="big num ${b.saving<0?'up':''}">${money(b.saving)}</div>
+    <div class="sub">저축률 <b style="color:var(--saving)">${pctPlain(b.rate)}</b>${dSav!=null?` · 전월 대비 <span class="${dir(dSav)}">${signed(dSav)}</span>`:''}</div>
+    <div class="flow"><i style="width:${b.fixed/flowTot*100}%;background:var(--fixed)"></i><i style="width:${b.variable/flowTot*100}%;background:var(--expense)"></i><i style="width:${Math.max(b.saving,0)/flowTot*100}%;background:var(--saving)"></i></div>
+    <div class="flow-lg"><span>고정비 ${pctPlain(b.income? b.fixed/b.income:0,0)}</span><span>변동비 ${pctPlain(b.income? b.variable/b.income:0,0)}</span><span>저축 ${pctPlain(Math.max(b.rate,0),0)}</span></div>
+  </section>
+  <div class="tiles">
+    <div class="tile"><div class="t"><i class="dot" style="background:var(--income)"></i>수입</div><div class="v num">${money(b.income)}</div>${pb.has?`<div class="d ${dir(b.income-pb.income)}">${signed(b.income-pb.income)}</div>`:''}</div>
+    <div class="tile"><div class="t"><i class="dot" style="background:var(--expense)"></i>지출</div><div class="v num">${money(b.expense)}</div>${dExp!=null?`<div class="d ${dir(dExp)}">${signed(dExp)}</div>`:''}</div>
+    <div class="tile"><div class="t"><i class="dot" style="background:var(--saving)"></i>저축</div><div class="v num">${money(b.saving)}</div>${dSav!=null?`<div class="d ${dir(dSav)}">${signed(dSav)}</div>`:''}</div>
+  </div>
+  <section class="card">
+    <h3>수입 · 지출 · 저축 <small>수입 ${money(b.income)} 기준</small></h3>
+    <div class="donut"><canvas id="cFlow"></canvas><div class="center"><div><b class="num">${pctPlain(Math.max(b.rate,0),0)}</b><span>저축률</span></div></div></div>
+    <div class="legend">
+      ${[['고정비',b.fixed,'--fixed'],['변동비',b.variable,'--expense'],['저축',Math.max(b.saving,0),'--saving']].map(([n,a,c])=>`
+      <div class="lg"><i class="dot" style="background:var(${c})"></i><span class="n">${n}</span><span class="p num">${b.income?pctPlain(a/b.income,0):'-'}</span><span class="a num">${money(a)}</span></div>`).join('')}
+    </div>
+  </section>`;
+  if (exItems.length) html += `
+  <section class="card">
+    <h3>지출 구성 <small>${exItems.length}개 항목</small></h3>
+    <div class="donut"><canvas id="cExp"></canvas><div class="center"><div><b class="num" style="font-size:18px">${money(b.expense)}</b><span>총 지출</span></div></div></div>
+    <div class="legend">${exItems.map((i,k)=>`
+      <div class="lg"><i class="dot" style="background:${PALETTE[k%PALETTE.length]}"></i><span class="n">${esc(i.name)} <span class="muted" style="font-size:12px">${i.kind}</span></span><span class="p num">${pctPlain(i.amt/b.expense,0)}</span><span class="a num">${money(i.amt)}</span></div>`).join('')}</div>
+  </section>`;
+  html += `<section class="card"><h3>상세 내역</h3>${KINDS.map(k=>{
+    const its = b.items.filter(i=>i.kind===k); if (!its.length) return '';
+    const tot = its.reduce((a,i)=>a+i.amt,0), color = k==='수입'?'--income':k==='고정비'?'--fixed':'--expense';
+    const max = Math.max(...its.map(i=>Math.abs(i.amt)),1);
+    const prevMap = {}; pb.items.filter(i=>i.kind===k).forEach(i=>prevMap[i.name]=(prevMap[i.name]||0)+i.amt);
+    return `<div class="group"><div class="gh"><span><span class="tag">${k}</span></span><span class="num">${money(tot)}</span></div>
+      ${its.map(i=>{ const d = pb.has && prevMap[i.name]!=null ? i.amt - prevMap[i.name] : null;
+        return `<div class="row"><div class="n">${esc(i.name)}${i.memo?`<span class="memo">${esc(i.memo)}</span>`:''}
+          <div class="bar"><i style="width:${Math.abs(i.amt)/max*100}%;background:var(${color})"></i></div></div>
+          <div class="a num">${money(i.amt)}${d?`<span class="d ${dir(d)}">${signed(d)}</span>`:''}</div></div>`;}).join('')}</div>`;
+  }).join('')}</section>`;
+  $('#view').innerHTML = html;
+  donut('cFlow', ['고정비','변동비','저축'], [b.fixed,b.variable,Math.max(b.saving,0)], [css('--fixed'),css('--expense'),css('--saving')]);
+  if (exItems.length) donut('cExp', exItems.map(i=>i.name), exItems.map(i=>i.amt), exItems.map((_,k)=>PALETTE[k%PALETTE.length]));
+}
+
+/* ───────── 화면: 월별추이 ───────── */
+function viewTrend(){
+  const ms = Array.from({length:12},(_,i)=>bMonth(i+1)), on = ms.filter(x=>x.has);
+  if (!on.length) return emptyMonth(null, '가계부');
+  const tot = k => on.reduce((a,x)=>a+x[k],0);
+  const inc = tot('income'), exp = tot('expense'), sav = tot('saving');
+  const nul = (x,k) => x.has ? x[k] : null;
+  let cum = 0; const cumArr = ms.map(x => { if (!x.has) return null; cum += x.saving; return cum; });
+  $('#view').innerHTML = `
+  <section class="card hero">
+    <div class="label">${S.model.year}년 누적 저축 <span class="muted">· ${on.length}개월</span></div>
+    <div class="big num">${money(sav)}</div>
+    <div class="sub">평균 저축률 <b style="color:var(--saving)">${pctPlain(inc? sav/inc : 0)}</b> · 월평균 ${money(sav/on.length)}</div>
+  </section>
+  <div class="tiles">
+    <div class="tile"><div class="t"><i class="dot" style="background:var(--income)"></i>총 수입</div><div class="v num">${money(inc)}</div><div class="d muted">월 ${money(inc/on.length)}</div></div>
+    <div class="tile"><div class="t"><i class="dot" style="background:var(--expense)"></i>총 지출</div><div class="v num">${money(exp)}</div><div class="d muted">월 ${money(exp/on.length)}</div></div>
+    <div class="tile"><div class="t"><i class="dot" style="background:var(--saving)"></i>총 저축</div><div class="v num">${money(sav)}</div><div class="d muted">월 ${money(sav/on.length)}</div></div>
+  </div>
+  <section class="card"><h3>월별 수입 · 지출 · 저축</h3><div class="chart tall"><canvas id="cTrend"></canvas></div></section>
+  <section class="card"><h3>지출 구성 추이 <small>고정비 · 변동비</small></h3><div class="chart"><canvas id="cExpT"></canvas></div></section>
+  <section class="card"><h3>저축률 · 누적 저축</h3><div class="chart"><canvas id="cRate"></canvas></div></section>
+  <section class="card"><h3>월별 요약 <small>탭하면 해당 월로 이동</small></h3>
+    <table class="num"><thead><tr><th>월</th><th>수입</th><th>지출</th><th>저축</th><th>저축률</th></tr></thead>
+    <tbody>${ms.map(x=>`<tr class="click ${x.has?'':'off'}" data-m="${x.m}"><td>${x.m}월</td><td>${x.has?money(x.income):'-'}</td><td>${x.has?money(x.expense):'-'}</td><td class="${x.has&&x.saving<0?'up':''}">${x.has?money(x.saving):'-'}</td><td>${x.has?pctPlain(x.rate,0):'-'}</td></tr>`).join('')}</tbody>
+    <tfoot><tr><td>합계</td><td>${money(inc)}</td><td>${money(exp)}</td><td>${money(sav)}</td><td>${pctPlain(inc?sav/inc:0,0)}</td></tr></tfoot></table>
+  </section>`;
+  const leg = {position:'bottom', labels:{usePointStyle:true, pointStyle:'circle', boxWidth:7, boxHeight:7, padding:14}};
+  mk('cTrend', {type:'bar', data:{labels:monthLabels(), datasets:[
+      {label:'수입', data:ms.map(x=>nul(x,'income')), backgroundColor:css('--income'), borderRadius:4, maxBarThickness:14},
+      {label:'지출', data:ms.map(x=>nul(x,'expense')), backgroundColor:css('--expense'), borderRadius:4, maxBarThickness:14},
+      {label:'저축', data:ms.map(x=>nul(x,'saving')), backgroundColor:css('--saving'), borderRadius:4, maxBarThickness:14}]},
+    options:{plugins:{legend:leg, tooltip:{...baseTip, ...tipWon, mode:'index', intersect:false}}, scales:{x:scaleX, y:scaleWon()}}});
+  mk('cExpT', {type:'bar', data:{labels:monthLabels(), datasets:[
+      {label:'고정비', data:ms.map(x=>nul(x,'fixed')), backgroundColor:css('--fixed'), borderRadius:3, maxBarThickness:22},
+      {label:'변동비', data:ms.map(x=>nul(x,'variable')), backgroundColor:css('--expense'), borderRadius:3, maxBarThickness:22}]},
+    options:{plugins:{legend:leg, tooltip:{...baseTip, ...tipWon, mode:'index', intersect:false}}, scales:{x:{...scaleX, stacked:true}, y:scaleWon({stacked:true})}}});
+  mk('cRate', {data:{labels:monthLabels(), datasets:[
+      {type:'line', label:'저축률', data:ms.map(x=>x.has? +(x.rate*100).toFixed(1) : null), borderColor:css('--saving'), backgroundColor:css('--saving'), tension:.35, pointRadius:3, spanGaps:true, yAxisID:'y1'},
+      {type:'bar', label:'누적 저축', data:cumArr, backgroundColor:css('--accent-soft'), borderRadius:4, maxBarThickness:22, yAxisID:'y'}]},
+    options:{plugins:{legend:leg, tooltip:{...baseTip, mode:'index', intersect:false, callbacks:{label:c=> c.raw==null?'':` ${c.dataset.label}: ${c.dataset.yAxisID==='y1'? c.raw+'%' : money(c.raw)}`}}},
+      scales:{x:scaleX, y:scaleWon({position:'left'}), y1:{position:'right', grid:{display:false}, border:{display:false}, ticks:{callback:v=>v+'%', maxTicksLimit:5}}}}});
+  document.querySelectorAll('tr.click').forEach(tr => tr.onclick = () => { const m=+tr.dataset.m; if (!bMonth(m).has) return; S.month.budget = m; go('budget'); });
+}
+
+/* ───────── 화면: 자산 ───────── */
+function viewAsset(){
+  const m = S.month.asset, A = analysis(m), c = A.c, p = A.p;
+  if (!c.has) return emptyMonth(m, '자산');
+  const d = (cur, prev, kind) => A.prevOk ? `<div class="d ${dir(cur-prev)}">${signed(cur-prev)}${prev? ' ('+pct((cur-prev)/prev)+')' : ''}</div>` : `<div class="d muted">전월 데이터 없음</div>`;
+  const list = S.model.assets;
+  const ms = Array.from({length:12},(_,i)=>aMonth(i+1));
+  const opt = [['__net','순자산'],['__total','총자산'],['__debt','부채'],
+    ...BIGS.flatMap(b => midsOf(b).map(md => ['mid:'+b+'|'+md, `${md} (${b})`])),
+    ...list.map((a,i)=>['item:'+i, `${a.small} · ${a.mid}`])];
+  if (!opt.some(o=>o[0]===S.assetPick)) S.assetPick = '__net';
+
+  let html = `
+  <section class="card hero">
+    <div class="label">${m}월 말 순자산</div>
+    <div class="big num">${money(c.net)}</div>
+    <div class="sub">${A.prevOk ? `전월 대비 <span class="${dir(A.dNet)}"><b>${signed(A.dNet)}</b> (${A.rNet!=null?pct(A.rNet,2):'-'})</span>` : '전월 자산 데이터가 없어 비교할 수 없어요'}</div>
+  </section>
+  <div class="tiles two">
+    <div class="tile"><div class="t">총자산</div><div class="v num">${money(c.total)}</div>${d(c.total,p.total)}</div>
+    <div class="tile"><div class="t">부채</div><div class="v num">${money(c.debt)}</div>${d(c.debt,p.debt)}</div>
+    <div class="tile"><div class="t">유동자산</div><div class="v num">${money(c.liquid)}</div>${d(c.liquid,p.liquid)}</div>
+    <div class="tile"><div class="t">비유동자산</div><div class="v num">${money(c.fixedA)}</div>${d(c.fixedA,p.fixedA)}</div>
+  </div>
+  <section class="card"><h3>${m}월 자산 분석 <small>전월 대비</small></h3>
+    ${A.prevOk ? `<div class="stats">
+      <div class="stat"><div class="t">순자산 증감</div><div class="v num ${dir(A.dNet)}">${signed(A.dNet)}</div></div>
+      <div class="stat"><div class="t">순자산 수익률</div><div class="v num ${dir(A.dNet)}">${A.rNet!=null?pct(A.rNet,2):'-'}</div><div class="h">순자산 증감 ÷ 전월 순자산</div></div>
+      <div class="stat"><div class="t">총자산 증감</div><div class="v num ${dir(A.dTotal)}">${signed(A.dTotal)}</div></div>
+      <div class="stat"><div class="t">총자산 증감률</div><div class="v num ${dir(A.dTotal)}">${A.rTotal!=null?pct(A.rTotal,2):'-'}</div></div>
+      <div class="stat"><div class="t">이번 달 저축 (가계부)</div><div class="v num">${A.saving!=null?money(A.saving):'-'}</div><div class="h">수입 − 지출</div></div>
+      <div class="stat"><div class="t">저축 외 자산 변동</div><div class="v num ${A.other!=null?dir(A.other):''}">${A.other!=null?signed(A.other):'-'}</div><div class="h">투자손익 · 시세 · 상환 등</div></div>
+      <div class="stat"><div class="t">저축 제외 수익률</div><div class="v num ${A.rOther!=null?dir(A.rOther):''}">${A.rOther!=null?pct(A.rOther,2):'-'}</div><div class="h">저축 외 변동 ÷ 전월 순자산</div></div>
+      <div class="stat"><div class="t">부채비율</div><div class="v num">${pctPlain(A.debtRatio)}</div><div class="h">부채 ÷ 총자산</div></div>
+    </div>` : `<div class="stats"><div class="stat"><div class="t">부채비율</div><div class="v num">${pctPlain(A.debtRatio)}</div></div></div><p class="note">전월 자산을 입력하면 증감·수익률이 표시돼요.</p>`}
+  </section>
+  <section class="card"><h3>항목별 자산 <small>${A.prevOk?'괄호: 전월 대비':''}</small></h3>
+    ${BIGS.map(big=>{
+      const its = list.filter(a=>a.big===big); if (!its.length) return '';
+      const tot = big==='유동자산'?c.liquid:big==='비유동자산'?c.fixedA:c.debt, ptot = big==='유동자산'?p.liquid:big==='비유동자산'?p.fixedA:p.debt;
+      return `<div class="group"><div class="gh"><span><span class="tag">${big}</span></span><span class="num" style="text-align:right">${money(tot)}${A.prevOk&&tot!==ptot?`<span class="${dir(tot-ptot)}" style="display:block;font-size:12px;font-weight:500">${signed(tot-ptot)}</span>`:''}</span></div>
+      ${midsOf(big).map(md=>{
+        const sub = its.filter(a=>a.mid===md), st = sub.reduce((s,a)=>s+c.val(a),0), sp = sub.reduce((s,a)=>s+(p.val?p.val(a):0),0);
+        return `<div class="row mid"><div class="n">${esc(md)}</div><div class="a num">${money(st)}${A.prevOk&&st!==sp?`<span class="d ${dir(st-sp)}">${signed(st-sp)}</span>`:''}</div></div>
+        ${sub.map(a=>{ const v=c.val(a), pv=A.prevOk? p.val(a):null, dd = pv!=null? v-pv : 0;
+          return `<div class="row sub-row"><div class="n">${esc(a.small)}<div class="bar"><i style="width:${tot? Math.abs(v)/Math.abs(tot)*100:0}%;background:${big==='부채'?'var(--expense)':'var(--accent)'}"></i></div></div>
+          <div class="a num">${money(v)}${dd?`<span class="d ${dir(dd)}">${signed(dd)}</span>`:''}</div></div>`;}).join('')}`;
+      }).join('')}</div>`;
+    }).join('')}
+  </section>
+  <section class="card"><h3>순자산 · 총자산 · 부채 추이</h3><div class="chart"><canvas id="cNet"></canvas></div></section>
+  <section class="card"><h3>자산 구성 변화 <small>중분류</small></h3><div class="chart tall"><canvas id="cMix"></canvas></div></section>
+  <section class="card"><h3>항목별 추이 <select class="pick" id="pick">${opt.map(o=>`<option value="${esc(o[0])}"${o[0]===S.assetPick?' selected':''}>${esc(o[1])}</option>`).join('')}</select></h3>
+    <div class="chart"><canvas id="cPick"></canvas></div><div id="pickInfo" class="note"></div></section>`;
+  $('#view').innerHTML = html;
+
+  const leg = {position:'bottom', labels:{usePointStyle:true, pointStyle:'circle', boxWidth:7, boxHeight:7, padding:14}};
+  const line = (label, data, color, fill) => ({label, data, borderColor:color, backgroundColor:fill||color, tension:.35, pointRadius:3, pointHoverRadius:5, spanGaps:true, fill:!!fill, borderWidth:2.2});
+  const g = (x,k) => x.has ? x[k] : null;
+  mk('cNet', {type:'line', data:{labels:monthLabels(), datasets:[
+      line('순자산', ms.map(x=>g(x,'net')), css('--accent')),
+      line('총자산', ms.map(x=>g(x,'total')), css('--saving')),
+      line('부채', ms.map(x=>g(x,'debt')), css('--expense'))]},
+    options:{interaction:{mode:'index', intersect:false}, plugins:{legend:leg, tooltip:{...baseTip, ...tipWon}}, scales:{x:scaleX, y:scaleWon()}}});
+  const mids = ['유동자산','비유동자산'].flatMap(b=>midsOf(b).map(md=>[b,md]));
+  mk('cMix', {type:'bar', data:{labels:monthLabels(), datasets: mids.map(([b,md],k)=>({label:md, backgroundColor:PALETTE[k%PALETTE.length], maxBarThickness:24, borderRadius:2,
+      data: ms.map(x=> x.has ? list.filter(a=>a.big===b&&a.mid===md).reduce((s,a)=>s+x.val(a),0) : null)}))},
+    options:{interaction:{mode:'index', intersect:false}, plugins:{legend:leg, tooltip:{...baseTip, ...tipWon}}, scales:{x:{...scaleX, stacked:true}, y:scaleWon({stacked:true})}}});
+  const drawPick = () => {
+    const k = S.assetPick; let data, color = css('--accent');
+    if (k==='__net') data = ms.map(x=>g(x,'net'));
+    else if (k==='__total') { data = ms.map(x=>g(x,'total')); color = css('--saving'); }
+    else if (k==='__debt') { data = ms.map(x=>g(x,'debt')); color = css('--expense'); }
+    else if (k.startsWith('mid:')) { const [b,md] = k.slice(4).split('|'); if (b==='부채') color = css('--expense');
+      data = ms.map(x=> x.has ? list.filter(a=>a.big===b&&a.mid===md).reduce((s,a)=>s+x.val(a),0) : null); }
+    else { const a = list[+k.slice(5)]; if (a.big==='부채') color = css('--expense'); data = a.v.map(v=>v); }
+    const label = opt.find(o=>o[0]===k)[1];
+    const ch = charts.find(c=>c.canvas.id==='cPick'); if (ch){ ch.destroy(); charts.splice(charts.indexOf(ch),1); }
+    mk('cPick', {type:'line', data:{labels:monthLabels(), datasets:[line(label, data, color, color+'22')]},
+      options:{plugins:{legend:{display:false}, tooltip:{...baseTip, ...tipWon}}, scales:{x:scaleX, y:scaleWon()}}});
+    const pts = data.map((v,i)=>[i+1,v]).filter(x=>x[1]!=null);
+    $('#pickInfo').innerHTML = pts.length>=2 ? `${pts[0][0]}월 → ${pts.at(-1)[0]}월: <b class="${dir(pts.at(-1)[1]-pts[0][1])}">${signed(pts.at(-1)[1]-pts[0][1])}</b>${pts[0][1]?` (${pct((pts.at(-1)[1]-pts[0][1])/Math.abs(pts[0][1]))})`:''}` : '';
+  };
+  drawPick();
+  $('#pick').onchange = e => { S.assetPick = e.target.value; LS.set('assetPick', S.assetPick); drawPick(); };
+}
+
+function emptyMonth(m, what){
+  $('#view').innerHTML = !S.model ? `
+    <div class="empty"><b>아직 불러온 데이터가 없어요</b>설정에 게시 URL을 넣거나<br>예시 데이터로 먼저 둘러보세요.
+      <div style="margin-top:20px;max-width:320px;margin-inline:auto"><button class="btn" onclick="openSheet()">설정 열기</button><button class="btn ghost" onclick="loadDemo()">예시 데이터로 보기</button></div></div>`
+    : `<div class="empty"><b>${m?m+'월 ':''}${what} 데이터가 없어요</b>엑셀의 ${what==='자산'?"'자산관리' 시트 "+(m||'')+"월 열":(m||'')+"월 시트"}에 입력하면 여기에 표시돼요.</div>`;
+}
+
+/* ───────── 라우팅 ───────── */
+const TITLES = {budget:'가계부', trend:'월별추이', asset:'자산'};
+function render(){
+  killCharts();
+  $('#title').innerHTML = TITLES[S.tab] + (S.meta.source==='demo' ? '<span class="demo-badge">예시</span>' : '');
+  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab===S.tab));
+  const key = S.tab==='asset' ? 'asset' : 'budget';
+  const step = $('#stepper'); step.style.display = (S.tab==='trend' || !S.model) ? 'none' : 'flex';
+  if (S.model){
+    if (S.month[key]==null) S.month[key] = key==='asset' ? lastWith(aMonth) : lastWith(bMonth);
+    $('#curM').textContent = `${S.model.year}년 ${S.month[key]}월`;
+    $('#prevM').disabled = S.month[key] <= 1; $('#nextM').disabled = S.month[key] >= 12;
+  }
+  updateStatus();
+  if (!S.model) return emptyMonth(null, '');
+  ({budget:viewBudget, trend:viewTrend, asset:viewAsset})[S.tab]();
+}
+function go(tab){ S.tab = tab; LS.set('tab', tab); window.scrollTo(0,0); render(); }
+document.querySelectorAll('nav.tabs button').forEach(b => b.onclick = () => go(b.dataset.tab));
+const shift = n => { const key = S.tab==='asset'?'asset':'budget'; S.month[key] = Math.min(12, Math.max(1, S.month[key]+n)); render(); };
+$('#prevM').onclick = () => shift(-1); $('#nextM').onclick = () => shift(1);
+// 좌우 스와이프로 월 이동
+(() => { let x0=null, y0=null;
+  document.addEventListener('touchstart', e => { if (e.target.closest('canvas,.sheet,select')) return; x0=e.touches[0].clientX; y0=e.touches[0].clientY; }, {passive:true});
+  document.addEventListener('touchend', e => { if (x0==null) return; const dx=e.changedTouches[0].clientX-x0, dy=e.changedTouches[0].clientY-y0; x0=null;
+    if (S.tab!=='trend' && S.model && Math.abs(dx)>70 && Math.abs(dy)<40) shift(dx<0?1:-1); }, {passive:true});
+})();
+
+/* ───────── 테마 ───────── */
+const mq = window.matchMedia('(prefers-color-scheme: dark)');
+function applyTheme(){
+  const t = S.theme==='system' ? (mq.matches?'dark':'light') : S.theme;
+  document.documentElement.dataset.theme = t;
+  document.querySelector('meta[name=theme-color]').content = t==='dark' ? '#0E1013' : '#F5F6F8';
+}
+mq.addEventListener?.('change', () => { if (S.theme==='system'){ applyTheme(); render(); } });
+
+/* ───────── 설정 시트 ───────── */
+function seg(id, val, cb){ const el = $(id); el.querySelectorAll('button').forEach(b => { b.classList.toggle('on', b.dataset.v===val); b.onclick = () => cb(b.dataset.v); }); }
+function syncSheet(){
+  seg('#segTheme', S.theme, v => { S.theme=v; LS.set('theme',v); applyTheme(); syncSheet(); render(); });
+  seg('#segUnit', S.unit, v => { S.unit=v; LS.set('unit',v); syncSheet(); render(); });
+  $('#inPub').value = S.pubUrl;
+  $('#sSource').textContent = !S.model ? '없음' : S.meta.source==='pub' ? '구글 스프레드시트 (웹에 게시)' : S.meta.source==='file' ? '기기 파일 · ' + (S.meta.name||'') : '예시 데이터';
+  $('#sSync').textContent = S.meta.syncedAt ? fmtTime(S.meta.syncedAt) : '-';
+}
+function openSheet(){ syncSheet(); $('#sheet').classList.add('on'); $('#scrim').classList.add('on'); }
+function closeSheet(){
+  S.pubUrl = $('#inPub').value.trim(); LS.set('pubUrl', S.pubUrl);
+  $('#sheet').classList.remove('on'); $('#scrim').classList.remove('on');
+}
+$('#setBtn').onclick = openSheet; $('#closeSheet').onclick = closeSheet; $('#scrim').onclick = closeSheet;
+$('#btnSync').onclick = () => { closeSheet(); syncPub(true); };
+$('#btnDemo').onclick = () => { closeSheet(); loadDemo(); };
+$('#btnFile').onclick = () => $('#fileInput').click();
+$('#fileInput').onchange = async e => { const f = e.target.files[0]; if (!f) return; closeSheet();
+  try { setModel(parseWorkbook(await f.arrayBuffer()), {source:'file', name:f.name, modified:f.lastModified}); toast('파일을 불러왔어요'); }
+  catch(err){ toast('파일을 읽지 못했어요: ' + err.message); } e.target.value=''; };
+$('#syncBtn').onclick = () => S.pubUrl ? syncPub(true) : openSheet();
+
+/* ───────── 데이터 반영 ───────── */
+function setModel(model, meta){
+  S.model = model; S.meta = {...meta, syncedAt: Date.now()};
+  LS.set('model', model); LS.set('meta', S.meta);
+  S.month = {budget:null, asset:null}; render();
+}
+async function loadDemo(){
+  try { const r = await fetch('demo.xlsx'); if (!r.ok) throw new Error(r.status);
+    setModel(parseWorkbook(await r.arrayBuffer()), {source:'demo'}); toast('예시 데이터를 불러왔어요'); }
+  catch(e){ toast('예시 파일을 불러오지 못했어요'); }
+}
+const fmtTime = t => { const d = new Date(t); return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
+function updateStatus(){
+  $('#status').textContent = !S.model ? '' : S.meta.source==='pub' ? `업데이트 ${fmtTime(S.meta.syncedAt)}` :
+    S.meta.source==='file' ? `기기 파일 · ${fmtTime(S.meta.syncedAt)}` : '예시 데이터로 보는 중';
+}
+let toastT; function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'), 2600); }
+
+/* ───────── 구글 스프레드시트 '웹에 게시' (로그인 없이 읽기 전용) ───────── */
+// 어떤 형식(pubhtml, csv, 특정 시트)으로 게시한 주소든 전체 문서 xlsx 주소로 바꿔서 읽는다.
+function pubXlsxUrl(raw){
+  const m = /docs\.google\.com\/spreadsheets\/d\/e\/([\w-]+)/.exec(raw || '');
+  return m ? `https://docs.google.com/spreadsheets/d/e/${m[1]}/pub?output=xlsx` : null;
+}
+let syncing = false;
+async function syncPub(interactive){
+  if (syncing) return;
+  const url = pubXlsxUrl(S.pubUrl);
+  if (!url){
+    if (interactive){ toast(S.pubUrl ? "게시 URL 형식이 아니에요. '웹에 게시'에서 받은 주소를 넣어 주세요" : '설정에서 게시 URL을 입력하세요'); openSheet(); }
+    return;
+  }
+  syncing = true; $('#syncBtn').classList.add('spin');
+  try{
+    const r = await fetch(url + '&_t=' + Date.now(), {cache:'no-store'});
+    if (!r.ok) throw new Error(r.status===404 ? '게시가 중지됐거나 주소가 바뀌었어요' : 'HTTP ' + r.status);
+    const buf = await r.arrayBuffer();
+    const head = new Uint8Array(buf.slice(0, 2));
+    if (head[0] !== 0x50 || head[1] !== 0x4B) throw new Error('엑셀 파일이 아닌 응답이 왔어요. 게시 상태를 확인하세요');
+    const keep = {...S.month}, had = S.meta.source === 'pub';
+    setModel(parseWorkbook(buf), {source:'pub'});
+    if (had && keep.budget){ S.month = keep; render(); }
+    if (interactive) toast('최신 데이터로 업데이트했어요');
+  }catch(e){
+    if (interactive || !S.model) toast('불러오기 실패: ' + (e instanceof TypeError ? '네트워크 연결 또는 접근이 차단됐어요' : e.message));
+  }finally{ syncing = false; $('#syncBtn').classList.remove('spin'); }
+}
+
+/* ───────── 시작 ───────── */
+applyTheme();
+LS.del('token'); LS.del('authState'); LS.del('clientId'); LS.del('fileRef');   // 이전 로그인 방식 흔적 정리
+render();
+const stale = () => S.pubUrl && Date.now() - (S.meta.syncedAt || 0) > 60 * 1000;
+if (S.pubUrl && (S.meta.source !== 'file' && S.meta.source !== 'demo' || !S.model) && stale()) syncPub(false);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && S.meta.source === 'pub' && stale()) syncPub(false);
+});
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script>
+</body>
+</html>
