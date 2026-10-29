@@ -461,6 +461,9 @@ function viewAsset(){
   const d = (cur, prev, kind) => A.prevOk ? `<div class="d ${dir(cur-prev)}">${signed(cur-prev)}${prev? ' ('+pct((cur-prev)/prev)+')' : ''}</div>` : `<div class="d muted">전월 데이터 없음</div>`;
   const list = S.model.assets;
   const ms = Array.from({length:12},(_,i)=>aMonth(i+1));
+  // 1월 대비 현재(가장 최근 입력월) — 엑셀 자산관리 상단 칸과 같은 기준
+  const L = lastWith(aMonth), j = ms[0], cur = ms[L-1];
+  const ytd = (j.has && L >= 2) ? [['총자산', j.total, cur.total], ['순자산', j.net, cur.net]] : null;
   const opt = [['__net','순자산'],['__total','총자산'],['__debt','부채'],
     ...BIGS.flatMap(b => midsOf(b).map(md => ['mid:'+b+'|'+md, `${md} (${b})`])),
     ...list.map((a,i)=>['item:'+i, `${a.small} · ${a.mid}`])];
@@ -478,6 +481,11 @@ function viewAsset(){
     <div class="tile"><div class="t">유동자산</div><div class="v num">${money(c.liquid)}</div>${d(c.liquid,p.liquid)}</div>
     <div class="tile"><div class="t">비유동자산</div><div class="v num">${money(c.fixedA)}</div>${d(c.fixedA,p.fixedA)}</div>
   </div>
+  ${ytd ? `<section class="card"><h3>1월 대비 현재 <small>1월 → ${L}월${L!==m?' (최근)':''}</small></h3>
+    <div class="stats">${ytd.map(([n,a,b])=>`
+      <div class="stat"><div class="t">${n} 증가율</div><div class="v num ${dir(b-a)}" style="font-size:22px">${a?pct((b-a)/Math.abs(a),2):'-'}</div>
+        <div class="h" style="color:var(--sub)"><span class="${dir(b-a)}">${signed(b-a)}</span> · ${money(a)} → ${money(b)}</div></div>`).join('')}
+    </div></section>` : ''}
   <section class="card"><h3>${m}월 자산 분석 <small>전월 대비</small></h3>
     ${A.prevOk ? `<div class="stats">
       <div class="stat"><div class="t">순자산 증감</div><div class="v num ${dir(A.dNet)}">${signed(A.dNet)}</div></div>
