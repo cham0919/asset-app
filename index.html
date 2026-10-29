@@ -18,14 +18,14 @@
 :root{
   --bg:#F5F6F8; --card:#FFFFFF; --ink:#191F28; --sub:#6B7684; --faint:#AEB5BF; --line:#EEF0F3;
   --chip:#F2F4F6; --accent:#3182F6; --accent-soft:#E8F3FF;
-  --up:#F04452; --down:#3182F6; --income:#3182F6; --expense:#F04452; --saving:#22B07D; --fixed:#FB923C;
+  --up:#F04452; --down:#3182F6; --income:#3182F6; --expense:#F04452; --saving:#22B07D; --repay:#7C5CFC; --fixed:#FB923C;
   --shadow:0 1px 2px rgba(0,0,0,.04),0 4px 16px rgba(0,0,0,.04);
   --tabbar:rgba(255,255,255,.88);
 }
 :root[data-theme="dark"]{
   --bg:#0E1013; --card:#1A1D22; --ink:#ECEEF1; --sub:#9AA2AD; --faint:#5E6670; --line:#262A31;
   --chip:#23272E; --accent:#4C94FF; --accent-soft:#1B2B44;
-  --up:#FF5C6A; --down:#4C94FF; --income:#4C94FF; --expense:#FF5C6A; --saving:#2FC48D; --fixed:#FDA15A;
+  --up:#FF5C6A; --down:#4C94FF; --income:#4C94FF; --expense:#FF5C6A; --saving:#2FC48D; --repay:#9B86FF; --fixed:#FDA15A;
   --shadow:none; --tabbar:rgba(20,22,26,.88);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -111,6 +111,11 @@ main{padding:4px 16px calc(96px + env(safe-area-inset-bottom));max-width:640px;m
 .stat .h{font-size:11px;color:var(--faint);margin-top:1px}
 .flow{display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--chip);margin:14px 0 6px}
 .flow i{display:block;height:100%}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.split .s{background:var(--chip);border-radius:14px;padding:12px}
+.split .s .t{font-size:12px;color:var(--sub);font-weight:600;display:flex;align-items:center;gap:6px}
+.split .s .v{font-size:17px;font-weight:750;margin-top:3px;letter-spacing:-.02em}
+.split .s .d{font-size:12px;margin-top:1px}
 .flow-lg{display:flex;justify-content:space-between;font-size:12px;color:var(--sub)}
 
 table{width:100%;border-collapse:collapse;font-size:13.5px}
@@ -277,7 +282,12 @@ function parseWorkbook(buf){
   const rows = name => wb.Sheets[name] ? XLSX.utils.sheet_to_json(wb.Sheets[name], {header:1, raw:true, defval:null}) : null;
   let year = null;
   const st = rows('설정');
-  if (st) for (const r of st){ const i = r.findIndex(c => str(c).replace(/\s/g,'') === '기준연도'); if (i>=0){ year = toNum(r[i+1]); break; } }
+  let prevDebt = null;   // 설정 '전년 12월 말 부채' (1월 대출 상환액 계산용)
+  if (st) for (const r of st){
+    const lab = c => str(c).replace(/\s/g,'');
+    let i = r.findIndex(c => lab(c) === '기준연도'); if (i >= 0 && year == null) year = toNum(r[i+1]);
+    i = r.findIndex(c => lab(c) === '전년12월말부채'); if (i >= 0) prevDebt = toNum(r[i+1]);
+  }
   if (!year) year = new Date().getFullYear();
 
   const budget = {};
@@ -310,10 +320,18 @@ function parseWorkbook(buf){
     const v = []; for (let m=1; m<=12; m++) v.push(monthCol[m]!=null ? toNum(r[monthCol[m]]) : null);
     assets.push({big:b, mid: str(r[1]) || '기타', small: str(r[2]) || str(r[1]) || '항목', v});
   }
-  return {year, budget, assets};
+  return {year, budget, assets, prevDebt};
 }
 
 /* ───────── 계산 ───────── */
+// 자산 탭 '1월 대비 현재'의 자산군 수익률. 소분류 이름(필요하면 대분류까지)으로 묶는다.
+const RETURN_GROUPS = [
+  {name:'주식', label:'주식 수익률', note:'현금 · 주식 · 퇴직금 합산',
+   items:[['유동자산','현금'], [null,'참주식'], [null,'정윤주식'], [null,'참퇴직금'], [null,'정윤퇴직금']]},
+  {name:'부동산', label:'부동산 수익률', note:'아파트', items:[['비유동자산','아파트']]},
+];
+const inGroup = (g, a) => g.items.some(([big, small]) => a.small === small && (!big || a.big === big));
+
 function wrapYM(m, y){ if (m < 1) return [m + 12, y - 1]; if (m > 12) return [m - 12, y + 1]; return [m, y]; }
 function bMonth(m, y = S.year){
   [m, y] = wrapYM(m, y);
@@ -321,7 +339,17 @@ function bMonth(m, y = S.year){
   const sum = k => items.filter(i=>i.kind===k).reduce((a,i)=>a+i.amt,0);
   const income = sum('수입'), fixed = sum('고정비'), variable = sum('변동비'), expense = fixed + variable;
   const has = items.some(i => i.filled && i.amt !== 0);
-  return {m, y, items, has, income, fixed, variable, expense, saving: income-expense, rate: income ? (income-expense)/income : 0};
+  const cash = income - expense, repay = loanRepay(m, y), saving = cash + repay;
+  return {m, y, items, has, income, fixed, variable, expense, cash, repay, saving, rate: income ? saving/income : 0};
+}
+// 대출상환 저축 = 전월 부채 − 이번 달 부채 (줄어든 만큼만). 엑셀과 같은 규칙:
+// 1월은 설정 시트의 '전년 12월 말 부채' 우선, 없으면 등록된 전년도 파일의 12월 값.
+function loanRepay(m, y){
+  const c = aMonth(m, y); if (!c.has) return 0;
+  let prev = null;
+  if (m === 1 && S.years?.[y]?.prevDebt != null) prev = S.years[y].prevDebt;
+  else { const p = aMonth(m - 1, y); if (p.has) prev = p.debt; }
+  return prev == null ? 0 : Math.max(0, prev - c.debt);
 }
 function aMonth(m, y = S.year){
   [m, y] = wrapYM(m, y);
@@ -344,8 +372,9 @@ function analysis(m){
   if (r.prevOk){
     r.dTotal = c.total - p.total; r.dNet = c.net - p.net;
     r.rTotal = p.total ? r.dTotal/p.total : null; r.rNet = p.net ? r.dNet/p.net : null;
-    r.saving = b.has ? b.saving : null;
-    r.other = r.saving!=null ? r.dNet - r.saving : null;
+    r.cash = b.has ? b.cash : null; r.repay = b.repay;
+    r.saving = (r.cash || 0) + r.repay;
+    r.other = r.dNet - r.saving;
     r.rOther = (r.other!=null && p.net) ? r.other/p.net : null;
   }
   r.debtRatio = c.total ? c.debt/c.total : 0;
@@ -387,23 +416,31 @@ function viewBudget(){
   const flowTot = Math.max(b.income, b.expense, 1);
   let html = `
   <section class="card hero">
-    <div class="label">${m}월 저축 <span class="muted">· 수입 − 지출</span></div>
+    <div class="label">${m}월 저축 합계 <span class="muted">· 일반 + 대출상환</span></div>
     <div class="big num ${b.saving<0?'up':''}">${money(b.saving)}</div>
     <div class="sub">저축률 <b style="color:var(--saving)">${pctPlain(b.rate)}</b>${dSav!=null?` · 전월 대비 <span class="${dir(dSav)}">${signed(dSav)}</span>`:''}</div>
-    <div class="flow"><i style="width:${b.fixed/flowTot*100}%;background:var(--fixed)"></i><i style="width:${b.variable/flowTot*100}%;background:var(--expense)"></i><i style="width:${Math.max(b.saving,0)/flowTot*100}%;background:var(--saving)"></i></div>
-    <div class="flow-lg"><span>고정비 ${pctPlain(b.income? b.fixed/b.income:0,0)}</span><span>변동비 ${pctPlain(b.income? b.variable/b.income:0,0)}</span><span>저축 ${pctPlain(Math.max(b.rate,0),0)}</span></div>
+    <div class="split">
+      <div class="s"><div class="t"><i class="dot" style="background:var(--saving)"></i>일반 저축</div><div class="v num ${b.cash<0?'up':''}">${money(b.cash)}</div>
+        <div class="d">${pb.has?`<span class="${dir(b.cash-pb.cash)}">${signed(b.cash-pb.cash)}</span>`:'<span class="muted">수입 − 지출</span>'}</div></div>
+      <div class="s"><div class="t"><i class="dot" style="background:var(--repay)"></i>대출상환 저축</div><div class="v num">${money(b.repay)}</div>
+        <div class="d">${pb.has?`<span class="${dir(b.repay-pb.repay)}">${signed(b.repay-pb.repay)}</span>`:'<span class="muted">부채 감소분</span>'}</div></div>
+    </div>
+    <div class="flow"><i style="width:${b.fixed/flowTot*100}%;background:var(--fixed)"></i><i style="width:${b.variable/flowTot*100}%;background:var(--expense)"></i><i style="width:${Math.max(b.cash,0)/flowTot*100}%;background:var(--saving)"></i></div>
+    <div class="flow-lg"><span>고정비 ${pctPlain(b.income? b.fixed/b.income:0,0)}</span><span>변동비 ${pctPlain(b.income? b.variable/b.income:0,0)}</span><span>일반 저축 ${pctPlain(b.income? Math.max(b.cash,0)/b.income:0,0)}</span></div>
   </section>
   <div class="tiles">
     <div class="tile"><div class="t"><i class="dot" style="background:var(--income)"></i>수입</div><div class="v num">${money(b.income)}</div>${pb.has?`<div class="d ${dir(b.income-pb.income)}">${signed(b.income-pb.income)}</div>`:''}</div>
     <div class="tile"><div class="t"><i class="dot" style="background:var(--expense)"></i>지출</div><div class="v num">${money(b.expense)}</div>${dExp!=null?`<div class="d ${dir(dExp)}">${signed(dExp)}</div>`:''}</div>
-    <div class="tile"><div class="t"><i class="dot" style="background:var(--saving)"></i>저축</div><div class="v num">${money(b.saving)}</div>${dSav!=null?`<div class="d ${dir(dSav)}">${signed(dSav)}</div>`:''}</div>
+    <div class="tile"><div class="t"><i class="dot" style="background:var(--saving)"></i>저축 합계</div><div class="v num">${money(b.saving)}</div>${dSav!=null?`<div class="d ${dir(dSav)}">${signed(dSav)}</div>`:''}</div>
   </div>
   <section class="card">
-    <h3>수입 · 지출 · 저축 <small>수입 ${money(b.income)} 기준</small></h3>
-    <div class="donut"><canvas id="cFlow"></canvas><div class="center"><div><b class="num">${pctPlain(Math.max(b.rate,0),0)}</b><span>저축률</span></div></div></div>
+    <h3>수입 배분 <small>수입 ${money(b.income)} 기준</small></h3>
+    <div class="donut"><canvas id="cFlow"></canvas><div class="center"><div><b class="num">${pctPlain(Math.max(b.rate,0),0)}</b><span>저축률${b.repay?' (상환 포함)':''}</span></div></div></div>
     <div class="legend">
-      ${[['고정비',b.fixed,'--fixed'],['변동비',b.variable,'--expense'],['저축',Math.max(b.saving,0),'--saving']].map(([n,a,c])=>`
+      ${[['고정비',b.fixed,'--fixed'],['변동비',b.variable,'--expense'],['일반 저축',Math.max(b.cash,0),'--saving']].map(([n,a,c])=>`
       <div class="lg"><i class="dot" style="background:var(${c})"></i><span class="n">${n}</span><span class="p num">${b.income?pctPlain(a/b.income,0):'-'}</span><span class="a num">${money(a)}</span></div>`).join('')}
+      <div class="lg" style="border-top:1px solid var(--line);padding-top:10px"><i class="dot" style="background:var(--repay)"></i><span class="n">대출상환 저축 <span class="muted" style="font-size:12px">수입 외</span></span><span class="p num"></span><span class="a num">+${money(b.repay)}</span></div>
+      <div class="lg"><i class="dot" style="background:transparent"></i><span class="n"><b>저축 합계</b></span><span class="p num">${pctPlain(b.rate,0)}</span><span class="a num"><b>${money(b.saving)}</b></span></div>
     </div>
   </section>`;
   if (exItems.length) html += `
@@ -425,7 +462,7 @@ function viewBudget(){
           <div class="a num">${money(i.amt)}${d?`<span class="d ${dir(d)}">${signed(d)}</span>`:''}</div></div>`;}).join('')}</div>`;
   }).join('')}</section>`;
   $('#view').innerHTML = html;
-  donut('cFlow', ['고정비','변동비','저축'], [b.fixed,b.variable,Math.max(b.saving,0)], [css('--fixed'),css('--expense'),css('--saving')]);
+  donut('cFlow', ['고정비','변동비','일반 저축'], [b.fixed,b.variable,Math.max(b.cash,0)], [css('--fixed'),css('--expense'),css('--saving')]);
   if (exItems.length) donut('cExp', exItems.map(i=>i.name), exItems.map(i=>i.amt), exItems.map((_,k)=>PALETTE[k%PALETTE.length]));
 }
 
@@ -434,43 +471,58 @@ function viewTrend(){
   const ms = Array.from({length:12},(_,i)=>bMonth(i+1)), on = ms.filter(x=>x.has);
   if (!on.length) return emptyMonth(null, '가계부');
   const tot = k => on.reduce((a,x)=>a+x[k],0);
-  const inc = tot('income'), exp = tot('expense'), sav = tot('saving');
+  const inc = tot('income'), exp = tot('expense'), sav = tot('saving'), cash = tot('cash'), rep = tot('repay');
   const nul = (x,k) => x.has ? x[k] : null;
-  let cum = 0; const cumArr = ms.map(x => { if (!x.has) return null; cum += x.saving; return cum; });
+  const cum = k => { let c = 0; return ms.map(x => { if (!x.has) return null; c += x[k]; return c; }); };
+  const share = v => sav ? pctPlain(v/sav, 0) : '-';
   $('#view').innerHTML = `
   <section class="card hero">
-    <div class="label">${S.model.year}년 누적 저축 <span class="muted">· ${on.length}개월</span></div>
+    <div class="label">${S.model.year}년 누적 저축 합계 <span class="muted">· ${on.length}개월</span></div>
     <div class="big num">${money(sav)}</div>
     <div class="sub">평균 저축률 <b style="color:var(--saving)">${pctPlain(inc? sav/inc : 0)}</b> · 월평균 ${money(sav/on.length)}</div>
+    <div class="flow"><i style="width:${sav>0?Math.max(cash,0)/Math.max(sav,1)*100:0}%;background:var(--saving)"></i><i style="width:${sav>0?rep/Math.max(sav,1)*100:0}%;background:var(--repay)"></i></div>
+    <div class="split" style="margin-top:8px">
+      <div class="s"><div class="t"><i class="dot" style="background:var(--saving)"></i>일반 저축 · ${share(cash)}</div><div class="v num">${money(cash)}</div><div class="d muted">월 ${money(cash/on.length)}</div></div>
+      <div class="s"><div class="t"><i class="dot" style="background:var(--repay)"></i>대출상환 · ${share(rep)}</div><div class="v num">${money(rep)}</div><div class="d muted">월 ${money(rep/on.length)}</div></div>
+    </div>
   </section>
   <div class="tiles">
     <div class="tile"><div class="t"><i class="dot" style="background:var(--income)"></i>총 수입</div><div class="v num">${money(inc)}</div><div class="d muted">월 ${money(inc/on.length)}</div></div>
     <div class="tile"><div class="t"><i class="dot" style="background:var(--expense)"></i>총 지출</div><div class="v num">${money(exp)}</div><div class="d muted">월 ${money(exp/on.length)}</div></div>
-    <div class="tile"><div class="t"><i class="dot" style="background:var(--saving)"></i>총 저축</div><div class="v num">${money(sav)}</div><div class="d muted">월 ${money(sav/on.length)}</div></div>
+    <div class="tile"><div class="t"><i class="dot" style="background:var(--saving)"></i>저축 합계</div><div class="v num">${money(sav)}</div><div class="d muted">월 ${money(sav/on.length)}</div></div>
   </div>
-  <section class="card"><h3>월별 수입 · 지출 · 저축</h3><div class="chart tall"><canvas id="cTrend"></canvas></div></section>
+  <section class="card"><h3>월별 수입 · 지출 · 저축 합계</h3><div class="chart tall"><canvas id="cTrend"></canvas></div></section>
+  <section class="card"><h3>월별 저축 구성 <small>일반 · 대출상환</small></h3><div class="chart"><canvas id="cSav"></canvas></div></section>
+  <section class="card"><h3>누적 저축 · 저축률</h3><div class="chart"><canvas id="cRate"></canvas></div></section>
   <section class="card"><h3>지출 구성 추이 <small>고정비 · 변동비</small></h3><div class="chart"><canvas id="cExpT"></canvas></div></section>
-  <section class="card"><h3>저축률 · 누적 저축</h3><div class="chart"><canvas id="cRate"></canvas></div></section>
   <section class="card"><h3>월별 요약 <small>탭하면 해당 월로 이동</small></h3>
-    <table class="num"><thead><tr><th>월</th><th>수입</th><th>지출</th><th>저축</th><th>저축률</th></tr></thead>
-    <tbody>${ms.map(x=>`<tr class="click ${x.has?'':'off'}" data-m="${x.m}"><td>${x.m}월</td><td>${x.has?money(x.income):'-'}</td><td>${x.has?money(x.expense):'-'}</td><td class="${x.has&&x.saving<0?'up':''}">${x.has?money(x.saving):'-'}</td><td>${x.has?pctPlain(x.rate,0):'-'}</td></tr>`).join('')}</tbody>
-    <tfoot><tr><td>합계</td><td>${money(inc)}</td><td>${money(exp)}</td><td>${money(sav)}</td><td>${pctPlain(inc?sav/inc:0,0)}</td></tr></tfoot></table>
+    <table class="num" style="font-size:12.5px"><thead><tr><th>월</th><th>수입</th><th>지출</th><th>일반</th><th>대출상환</th><th>합계</th></tr></thead>
+    <tbody>${ms.map(x=>`<tr class="click ${x.has?'':'off'}" data-m="${x.m}"><td>${x.m}월</td><td>${x.has?money(x.income):'-'}</td><td>${x.has?money(x.expense):'-'}</td>
+      <td class="${x.has&&x.cash<0?'up':''}">${x.has?money(x.cash):'-'}</td><td>${x.has?money(x.repay):'-'}</td><td><b>${x.has?money(x.saving):'-'}</b></td></tr>`).join('')}</tbody>
+    <tfoot><tr><td>합계</td><td>${money(inc)}</td><td>${money(exp)}</td><td>${money(cash)}</td><td>${money(rep)}</td><td>${money(sav)}</td></tr></tfoot></table>
   </section>`;
   const leg = {position:'bottom', labels:{usePointStyle:true, pointStyle:'circle', boxWidth:7, boxHeight:7, padding:14}};
+  const tipIdx = {...baseTip, ...tipWon, mode:'index', intersect:false};
   mk('cTrend', {type:'bar', data:{labels:monthLabels(), datasets:[
       {label:'수입', data:ms.map(x=>nul(x,'income')), backgroundColor:css('--income'), borderRadius:4, maxBarThickness:14},
       {label:'지출', data:ms.map(x=>nul(x,'expense')), backgroundColor:css('--expense'), borderRadius:4, maxBarThickness:14},
-      {label:'저축', data:ms.map(x=>nul(x,'saving')), backgroundColor:css('--saving'), borderRadius:4, maxBarThickness:14}]},
-    options:{plugins:{legend:leg, tooltip:{...baseTip, ...tipWon, mode:'index', intersect:false}}, scales:{x:scaleX, y:scaleWon()}}});
+      {label:'저축 합계', data:ms.map(x=>nul(x,'saving')), backgroundColor:css('--saving'), borderRadius:4, maxBarThickness:14}]},
+    options:{plugins:{legend:leg, tooltip:tipIdx}, scales:{x:scaleX, y:scaleWon()}}});
+  mk('cSav', {type:'bar', data:{labels:monthLabels(), datasets:[
+      {label:'일반 저축', data:ms.map(x=>nul(x,'cash')), backgroundColor:css('--saving'), borderRadius:3, maxBarThickness:22},
+      {label:'대출상환 저축', data:ms.map(x=>nul(x,'repay')), backgroundColor:css('--repay'), borderRadius:3, maxBarThickness:22}]},
+    options:{plugins:{legend:leg, tooltip:{...tipIdx, callbacks:{...tipWon.callbacks, footer:it=>{ const t=it.reduce((a,c)=>a+(c.raw||0),0); return '합계 '+money(t); }}}},
+      scales:{x:{...scaleX, stacked:true}, y:scaleWon({stacked:true})}}});
+  mk('cRate', {data:{labels:monthLabels(), datasets:[
+      {type:'line', label:'저축률', data:ms.map(x=>x.has? +(x.rate*100).toFixed(1) : null), borderColor:css('--ink'), backgroundColor:css('--ink'), tension:.35, pointRadius:3, spanGaps:true, yAxisID:'y1', borderWidth:1.8},
+      {type:'bar', label:'누적 일반', data:cum('cash'), backgroundColor:css('--saving'), borderRadius:3, maxBarThickness:22, yAxisID:'y', stack:'c'},
+      {type:'bar', label:'누적 대출상환', data:cum('repay'), backgroundColor:css('--repay'), borderRadius:3, maxBarThickness:22, yAxisID:'y', stack:'c'}]},
+    options:{plugins:{legend:leg, tooltip:{...baseTip, mode:'index', intersect:false, callbacks:{label:c=> c.raw==null?'':` ${c.dataset.label}: ${c.dataset.yAxisID==='y1'? c.raw+'%' : money(c.raw)}`}}},
+      scales:{x:{...scaleX, stacked:true}, y:scaleWon({position:'left', stacked:true}), y1:{position:'right', grid:{display:false}, border:{display:false}, ticks:{callback:v=>v+'%', maxTicksLimit:5}}}}});
   mk('cExpT', {type:'bar', data:{labels:monthLabels(), datasets:[
       {label:'고정비', data:ms.map(x=>nul(x,'fixed')), backgroundColor:css('--fixed'), borderRadius:3, maxBarThickness:22},
       {label:'변동비', data:ms.map(x=>nul(x,'variable')), backgroundColor:css('--expense'), borderRadius:3, maxBarThickness:22}]},
-    options:{plugins:{legend:leg, tooltip:{...baseTip, ...tipWon, mode:'index', intersect:false}}, scales:{x:{...scaleX, stacked:true}, y:scaleWon({stacked:true})}}});
-  mk('cRate', {data:{labels:monthLabels(), datasets:[
-      {type:'line', label:'저축률', data:ms.map(x=>x.has? +(x.rate*100).toFixed(1) : null), borderColor:css('--saving'), backgroundColor:css('--saving'), tension:.35, pointRadius:3, spanGaps:true, yAxisID:'y1'},
-      {type:'bar', label:'누적 저축', data:cumArr, backgroundColor:css('--accent-soft'), borderRadius:4, maxBarThickness:22, yAxisID:'y'}]},
-    options:{plugins:{legend:leg, tooltip:{...baseTip, mode:'index', intersect:false, callbacks:{label:c=> c.raw==null?'':` ${c.dataset.label}: ${c.dataset.yAxisID==='y1'? c.raw+'%' : money(c.raw)}`}}},
-      scales:{x:scaleX, y:scaleWon({position:'left'}), y1:{position:'right', grid:{display:false}, border:{display:false}, ticks:{callback:v=>v+'%', maxTicksLimit:5}}}}});
+    options:{plugins:{legend:leg, tooltip:tipIdx}, scales:{x:{...scaleX, stacked:true}, y:scaleWon({stacked:true})}}});
   document.querySelectorAll('tr.click').forEach(tr => tr.onclick = () => { const m=+tr.dataset.m; if (!bMonth(m).has) return; S.month.budget = m; go('budget'); });
 }
 
@@ -486,7 +538,15 @@ function viewAsset(){
   const TM = now.getFullYear() > Y ? 12 : now.getFullYear() < Y ? 0 : now.getMonth() + 1;
   let L = 0; for (let k = TM; k >= 1; k--) if (ms[k-1].has) { L = k; break; }
   const j = ms[0], cur = ms[Math.max(L,1)-1];
-  const ytd = (j.has && L >= 2) ? [['총자산', j.total, cur.total], ['순자산', j.net, cur.net]] : null;
+  let ytd = null;
+  if (j.has && L >= 2){
+    ytd = [['총자산 증가율', j.total, cur.total, ''], ['순자산 증가율', j.net, cur.net, '']];
+    for (const g of RETURN_GROUPS){
+      const its = list.filter(a => inGroup(g, a)); if (!its.length) continue;   // 해당 항목이 없으면 생략
+      const sum = x => its.reduce((s, a) => s + x.val(a), 0);
+      ytd.push([g.label, sum(j), sum(cur), g.note]);
+    }
+  }
   const opt = [['__net','순자산'],['__total','총자산'],['__debt','부채'],
     ...BIGS.flatMap(b => midsOf(b).map(md => ['mid:'+b+'|'+md, `${md} (${b})`])),
     ...list.map((a,i)=>['item:'+i, `${a.small} · ${a.mid}`])];
@@ -505,9 +565,10 @@ function viewAsset(){
     <div class="tile"><div class="t">비유동자산</div><div class="v num">${money(c.fixedA)}</div>${d(c.fixedA,p.fixedA)}</div>
   </div>
   ${ytd ? `<section class="card"><h3>1월 대비 현재 <small>1월 → ${L}월${L<TM?` · ${TM}월 미입력`:''}</small></h3>
-    <div class="stats">${ytd.map(([n,a,b])=>`
-      <div class="stat"><div class="t">${n} 증가율</div><div class="v num ${dir(b-a)}" style="font-size:22px">${a?pct((b-a)/Math.abs(a),2):'-'}</div>
-        <div class="h" style="color:var(--sub)"><span class="${dir(b-a)}">${signed(b-a)}</span> · ${money(a)} → ${money(b)}</div></div>`).join('')}
+    <div class="stats">${ytd.map(([n,a,b,note])=>`
+      <div class="stat"><div class="t">${n}</div><div class="v num ${dir(b-a)}" style="font-size:22px">${a?pct((b-a)/Math.abs(a),2):'-'}</div>
+        <div class="h" style="color:var(--sub)"><span class="${dir(b-a)}" style="white-space:nowrap">${signed(b-a)}</span> · <span style="white-space:nowrap">${money(a)}</span> → <span style="white-space:nowrap">${money(b)}</span></div>
+        ${note?`<div class="h">${note}</div>`:''}</div>`).join('')}
     </div></section>` : ''}
   <section class="card"><h3>${m}월 자산 분석 <small>전월 대비</small></h3>
     ${A.prevOk ? `<div class="stats">
@@ -515,8 +576,10 @@ function viewAsset(){
       <div class="stat"><div class="t">순자산 수익률</div><div class="v num ${dir(A.dNet)}">${A.rNet!=null?pct(A.rNet,2):'-'}</div><div class="h">순자산 증감 ÷ 전월 순자산</div></div>
       <div class="stat"><div class="t">총자산 증감</div><div class="v num ${dir(A.dTotal)}">${signed(A.dTotal)}</div></div>
       <div class="stat"><div class="t">총자산 증감률</div><div class="v num ${dir(A.dTotal)}">${A.rTotal!=null?pct(A.rTotal,2):'-'}</div></div>
-      <div class="stat"><div class="t">이번 달 저축 (가계부)</div><div class="v num">${A.saving!=null?money(A.saving):'-'}</div><div class="h">수입 − 지출</div></div>
-      <div class="stat"><div class="t">저축 외 자산 변동</div><div class="v num ${A.other!=null?dir(A.other):''}">${A.other!=null?signed(A.other):'-'}</div><div class="h">투자손익 · 시세 · 상환 등</div></div>
+      <div class="stat"><div class="t"><i class="dot" style="background:var(--saving)"></i> 일반 저축</div><div class="v num">${A.cash!=null?money(A.cash):'-'}</div><div class="h">가계부 수입 − 지출</div></div>
+      <div class="stat"><div class="t"><i class="dot" style="background:var(--repay)"></i> 대출상환 저축</div><div class="v num">${money(A.repay)}</div><div class="h">부채 감소분</div></div>
+      <div class="stat"><div class="t">저축 합계</div><div class="v num">${money(A.saving)}</div><div class="h">일반 + 대출상환</div></div>
+      <div class="stat"><div class="t">저축 외 자산 변동</div><div class="v num ${A.other!=null?dir(A.other):''}">${A.other!=null?signed(A.other):'-'}</div><div class="h">순자산 증감 − 저축 합계 (투자손익 · 시세)</div></div>
       <div class="stat"><div class="t">저축 제외 수익률</div><div class="v num ${A.rOther!=null?dir(A.rOther):''}">${A.rOther!=null?pct(A.rOther,2):'-'}</div><div class="h">저축 외 변동 ÷ 전월 순자산</div></div>
       <div class="stat"><div class="t">부채비율</div><div class="v num">${pctPlain(A.debtRatio)}</div><div class="h">부채 ÷ 총자산</div></div>
     </div>` : `<div class="stats"><div class="stat"><div class="t">부채비율</div><div class="v num">${pctPlain(A.debtRatio)}</div></div></div><p class="note">전월 자산을 입력하면 증감·수익률이 표시돼요.</p>`}
