@@ -415,19 +415,25 @@ function parseWorkbook(buf){
 }
 
 /* ───────── 계산 ───────── */
-// 자산 탭 '1월 대비 현재'의 자산군 수익률. 소분류 이름(필요하면 대분류까지)으로 묶는다.
-// 홈 탭 분류. 금융투자·현금은 소분류 이름, 부동산은 중분류 '부동산', 부채는 대분류 '부채'로 묶는다.
+// 자산 묶음은 모두 중분류 이름으로 정한다. 소분류(항목) 이름은 자유롭게 바꾸거나 추가해도 된다.
+// 대분류(유동자산·비유동자산·부채)와 아래 중분류 이름은 시트와 같아야 한다.
+const MIDS = {
+  invest: ['투자', '퇴직금', '코인'],   // 홈 '금융투자'
+  cash:   ['저축', '청약'],             // 홈 '현금'
+  estate: ['부동산'],                   // 홈 '부동산'
+  stock:  ['투자', '퇴직금'],           // 자산 탭 '주식 수익률' (중분류 '코인'은 제외)
+};
+const inMids = (mids, a) => a.big !== '부채' && mids.includes(a.mid);
 const HOME_GROUPS = {
-  invest: {label:'금융투자', note:'주식 · 퇴직금 · 비트코인', match: a => ['참주식','정윤주식','참퇴직금','정윤퇴직금','비트코인'].includes(a.small)},
-  estate: {label:'부동산',   note:'중분류 부동산',           match: a => a.big === '비유동자산' && a.mid === '부동산'},
-  cash:   {label:'현금',     note:'현금 · 복지포인트 · 예비현금 · 청약', match: a => ['현금','복지포인트','예비현금','참청약','정윤청약'].includes(a.small)},
+  invest: {label:'금융투자', note:'중분류 ' + MIDS.invest.join(' · '), match: a => inMids(MIDS.invest, a)},
+  estate: {label:'부동산',   note:'중분류 ' + MIDS.estate.join(' · '), match: a => inMids(MIDS.estate, a)},
+  cash:   {label:'현금',     note:'중분류 ' + MIDS.cash.join(' · '),   match: a => inMids(MIDS.cash, a)},
 };
 const RETURN_GROUPS = [
-  {name:'주식', label:'주식 수익률', note:'참·정윤 주식 + 퇴직금 합산',
-   items:[[null,'참주식'], [null,'정윤주식'], [null,'참퇴직금'], [null,'정윤퇴직금']]},
-  {name:'부동산', label:'부동산 수익률', note:'아파트', items:[['비유동자산','아파트']]},
+  {name:'주식',   label:'주식 수익률',   note:'중분류 ' + MIDS.stock.join(' + '),  match: a => inMids(MIDS.stock, a)},
+  {name:'부동산', label:'부동산 수익률', note:'중분류 ' + MIDS.estate.join(' + '), match: a => inMids(MIDS.estate, a)},
 ];
-const inGroup = (g, a) => g.items.some(([big, small]) => a.small === small && (!big || a.big === big));
+const inGroup = (g, a) => g.match(a);
 
 function wrapYM(m, y){ if (m < 1) return [m + 12, y - 1]; if (m > 12) return [m - 12, y + 1]; return [m, y]; }
 function bMonth(m, y = S.year){
@@ -454,10 +460,20 @@ function aMonth(m, y = S.year){
   if (!M) return {has:false, m, y};
   const idx = m-1, list = M.assets;
   const has = list.some(a => a.v[idx] != null);
-  // 다른 연도 파일의 같은 항목은 대분류|중분류|소분류 이름으로 맞춰 찾는다
+  // 다른 연도 파일의 같은 항목은 대분류|중분류|소분류 이름으로 맞춰 찾고,
+  // 이름이 바뀌어 못 찾으면 같은 대분류·중분류 안에서 같은 순서의 항목으로 맞춘다.
   const key = a => a.big + '|' + a.mid + '|' + a.small, byKey = new Map();
   list.forEach(a => byKey.set(key(a), (byKey.get(key(a)) || 0) + (a.v[idx] ?? 0)));
-  const val = a => list.includes(a) ? (a.v[idx] ?? 0) : (byKey.get(key(a)) ?? 0);
+  const val = a => {
+    if (list.includes(a)) return a.v[idx] ?? 0;
+    if (byKey.has(key(a))) return byKey.get(key(a));
+    const own = Object.values(S.years).find(Y => Y.assets.includes(a));
+    if (!own) return 0;
+    const same = x => x.big === a.big && x.mid === a.mid;
+    const pos = own.assets.filter(same).indexOf(a), here = list.filter(same);
+    const cand = here[pos];
+    return cand && !own.assets.some(o => key(o) === key(cand)) ? (cand.v[idx] ?? 0) : 0;
+  };
   const by = b => list.filter(a=>a.big===b).reduce((s,a)=>s+val(a),0);
   const liquid = by('유동자산'), fixedA = by('비유동자산'), debt = by('부채');
   const total = liquid + fixedA;
@@ -546,7 +562,7 @@ function viewHome(){
     <div class="flow" style="margin-top:6px"><i style="width:${inv/tot*100}%;background:var(--accent)"></i><i style="width:${est/tot*100}%;background:var(--fixed)"></i><i style="width:${cash/tot*100}%;background:var(--saving)"></i>${looseSum?`<i style="width:${looseSum/tot*100}%;background:var(--faint)"></i>`:''}</div>
     <div class="flow-lg"><span>금융투자 ${pctPlain(inv/tot,0)}</span><span>부동산 ${pctPlain(est/tot,0)}</span><span>현금 ${pctPlain(cash/tot,0)}</span></div>
   </section>
-  ${loose.length ? `<div class="warn"><b>분류되지 않은 자산 ${loose.length}개</b> · ${loose.map(a => esc(a.small)).join(', ')} (${money(looseSum)})<br>홈의 금융투자·부동산·현금 어디에도 들어가지 않아요.</div>` : ''}
+  ${loose.length ? `<div class="warn"><b>분류되지 않은 자산 ${loose.length}개</b> · ${loose.map(a => esc(a.small)).join(', ')} (${money(looseSum)})<br>중분류가 투자·퇴직금·코인·저축·청약·부동산이 아니라 홈의 금융투자·부동산·현금 어디에도 들어가지 않아요.</div>` : ''}
   <div class="home-grid">
     <div class="hc"><div class="t">총자산</div><div class="v num">${money(cur.total)}</div>${foot(rTotal)}</div>
     <div class="hc"><div class="t">순자산</div><div class="v num">${money(cur.net)}</div>${foot(rNet)}</div>
